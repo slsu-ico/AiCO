@@ -189,6 +189,17 @@ test('logs in a seeded bootstrap admin and opens the admin dashboard', async () 
         }],
       };
     }
+    if (sqlIncludes(text, 'pending_account_requests')
+      && sqlIncludes(text, 'pending_content_reviews')
+      && sqlIncludes(text, 'published_records')) {
+      return {
+        rows: [{
+          pending_account_requests: '0',
+          pending_content_reviews: '0',
+          published_records: '0',
+        }],
+      };
+    }
     throw new Error(`Unexpected SQL: ${text}`);
   });
   const server = createAdminServer({ pool, redis });
@@ -215,6 +226,86 @@ test('logs in a seeded bootstrap admin and opens the admin dashboard', async () 
     assert.equal(dashboard.status, 200);
     assert.match(html, /Admin dashboard/);
     assert.match(html, /Bootstrap Administrator/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin dashboard shows pending account, pending review, and published counts', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'pending_account_requests')
+      && sqlIncludes(text, 'pending_content_reviews')
+      && sqlIncludes(text, 'published_records')) {
+      return {
+        rows: [{
+          pending_account_requests: '4',
+          pending_content_reviews: '7',
+          published_records: '19',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Admin dashboard/);
+    assert.match(html, /Pending account requests/);
+    assert.match(html, /<strong>4<\/strong>/);
+    assert.match(html, /Pending content reviews/);
+    assert.match(html, /<strong>7<\/strong>/);
+    assert.match(html, /Published records/);
+    assert.match(html, /<strong>19<\/strong>/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office dashboard shows submissions with status and latest admin note', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 22, office_id: 7 });
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv')
+      && sqlIncludes(text, 'latest_note.note AS latest_admin_note')
+      && sqlIncludes(text, 'cv.submitted_by = $2')) {
+      assert.deepEqual(params, [7, 22]);
+      return {
+        rows: [{
+          id: 901,
+          title: 'Scholarship FAQ',
+          content_type: 'faq',
+          status: 'needs_revision',
+          submitted_at: '2026-05-12T02:00:00.000Z',
+          latest_admin_note: 'Please add the eligibility period.',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /My submissions/);
+    assert.match(html, /Scholarship FAQ/);
+    assert.match(html, /FAQ/);
+    assert.match(html, /needs revision/);
+    assert.match(html, /Please add the eligibility period\./);
   } finally {
     await close(server);
   }

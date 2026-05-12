@@ -1,39 +1,72 @@
 # ICO Services Messenger Chatbot
 
-Facebook Messenger chatbot trial for Southern Luzon State University ICO services listed in the ICO Citizen's Charter 2026.
+Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State University ICO services listed in the ICO Citizen's Charter 2026.
 
 ## What It Does
 
-- Asks whether the requester is an SLSU internal unit/office or an external partner.
-- Shows the relevant ICO services for that requester type.
-- Provides step-by-step service guides from the Citizen's Charter.
-- Handles free-text questions by matching them to the closest service record.
-- Hands off safely when the question is outside the charter or needs staff judgment.
+- Answers Messenger questions from approved ICO service records.
+- Guides internal offices and external partners to the right Citizen's Charter service.
+- Provides an admin portal for account requests, office content submissions, admin review, and publication.
+- Keeps pending edits out of live chatbot answers until an administrator publishes them.
 
 ## Requirements
 
 - Node.js 24 or newer
+- PostgreSQL 14 or newer
+- Redis 7 or newer
 - A Meta app with Messenger configured
 - A Facebook Page access token
 - A public HTTPS deployment URL for live Messenger testing
 
-## Local Setup
+## PostgreSQL And Redis
 
-```powershell
-npm test
+Create a PostgreSQL database and make sure Redis is running locally or remotely. The default local URLs are:
+
+```text
+postgres://postgres:postgres@localhost:5432/aico
+redis://localhost:6379
 ```
+
+Copy the example environment file as a local reference:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Set these values in your environment before running live:
+Set these values in your shell, process manager, or deployment environment before running commands:
 
-- `PORT`
-- `MESSENGER_VERIFY_TOKEN`
-- `PAGE_ACCESS_TOKEN`
+- `PORT`: HTTP port, default `3000`.
+- `MESSENGER_VERIFY_TOKEN`: webhook verify token configured in Meta.
+- `PAGE_ACCESS_TOKEN`: Facebook Page access token for replies.
+- `DATABASE_URL`: PostgreSQL connection string.
+- `REDIS_URL`: Redis connection string.
+- `UPLOAD_DIR`: local upload storage path, default `uploads`.
+- `SESSION_SECRET`: long random secret for admin sessions.
+- `BOOTSTRAP_ADMIN_EMAIL`: email for the initial admin user.
+- `BOOTSTRAP_ADMIN_PASSWORD`: temporary initial admin password used only by the seed command.
+- `AI_FALLBACK_ENABLED`: reserved flag in `.env.example`; the current chatbot path is published-content first.
 
-Start the webhook server:
+## Setup
+
+Install dependencies:
+
+```powershell
+npm install
+```
+
+Create or update the database schema:
+
+```powershell
+npm run migrate
+```
+
+Seed the ICO office, bootstrap admin, and initial published Citizen's Charter services:
+
+```powershell
+npm run seed
+```
+
+Start the webhook and admin server:
 
 ```powershell
 npm start
@@ -44,6 +77,33 @@ The Messenger webhook callback path is:
 ```text
 /webhook
 ```
+
+The admin portal starts at:
+
+```text
+/login
+```
+
+## Bootstrap Admin Warning
+
+Set `BOOTSTRAP_ADMIN_PASSWORD` to a strong temporary value before running `npm run seed`. Sign in with `BOOTSTRAP_ADMIN_EMAIL`, create/approve proper admin accounts as needed, then rotate or disable the bootstrap credential according to your deployment process.
+
+## Chatbot Published Content
+
+The chatbot reads only active, published records from PostgreSQL through `src/publishedContentRepository.js`. Published services and FAQs are cached in Redis under `published:services` and `published:faqs` for 10 minutes. Admin approval invalidates those Redis keys so the next chatbot request can load the newly published content. Pending review, rejected, and needs revision records never affect live chatbot answers.
+
+## Important Paths
+
+- `src/server.js`: HTTP server, Messenger webhook, and route wiring.
+- `src/adminRoutes.js`: admin portal routes, dashboards, account request review, content submission, review, and publication.
+- `src/db/schema.sql`: PostgreSQL schema.
+- `src/db/migrate.js`: schema migration runner.
+- `src/db/seed.js`: bootstrap admin and initial service content seeding.
+- `src/publishedContentRepository.js`: database and Redis read path for chatbot content.
+- `src/layout.js`: SLSU branded admin layout.
+- `test/adminRoutes.test.js`: admin portal route tests with fake PostgreSQL and Redis services.
+- `data/services.json`: source service data imported by the seed command.
+- `uploads/`: default local attachment storage directory.
 
 ## Meta Messenger Setup
 
@@ -64,10 +124,10 @@ Run all tests:
 npm test
 ```
 
-Run the server:
+Run only the admin route tests:
 
 ```powershell
-npm start
+npm test -- test/adminRoutes.test.js
 ```
 
 ## Notes

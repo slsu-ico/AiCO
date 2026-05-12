@@ -107,12 +107,95 @@ function renderAccountRequest({ notice = '' } = {}) {
   });
 }
 
-function renderDashboard(user) {
+function formatStatus(status) {
+  return clean(status).replace(/_/g, ' ');
+}
+
+function renderAdminDashboard(user, counts) {
+  const safeCounts = {
+    pendingAccountRequests: Number(counts.pending_account_requests || 0),
+    pendingContentReviews: Number(counts.pending_content_reviews || 0),
+    publishedRecords: Number(counts.published_records || 0),
+  };
+
   return pageLayout({
     title: 'Admin dashboard',
     activePath: '/admin',
     user,
-    body: '<p>Admin dashboard placeholder</p>',
+    body: `
+      <table aria-label="Administrative counts">
+        <thead>
+          <tr>
+            <th>Queue</th>
+            <th>Count</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pending account requests</td>
+            <td><strong>${escapeHtml(safeCounts.pendingAccountRequests)}</strong></td>
+            <td><a class="button" href="/admin/account-requests">Review requests</a></td>
+          </tr>
+          <tr>
+            <td>Pending content reviews</td>
+            <td><strong>${escapeHtml(safeCounts.pendingContentReviews)}</strong></td>
+            <td><a class="button" href="/admin/reviews">Review content</a></td>
+          </tr>
+          <tr>
+            <td>Published records</td>
+            <td><strong>${escapeHtml(safeCounts.publishedRecords)}</strong></td>
+            <td>Available to the chatbot</td>
+          </tr>
+        </tbody>
+      </table>
+    `,
+  });
+}
+
+function renderOfficeSubmissionRows(rows) {
+  if (rows.length === 0) {
+    return '<p>No submissions yet.</p>';
+  }
+
+  const body = rows.map((submission) => `
+    <tr>
+      <td>${escapeHtml(submission.title)}</td>
+      <td>${escapeHtml(CONTENT_TYPE_LABELS[submission.content_type] || submission.content_type)}</td>
+      <td>${escapeHtml(formatStatus(submission.status))}</td>
+      <td>${escapeHtml(submission.submitted_at || '')}</td>
+      <td>${escapeHtml(submission.latest_admin_note || '')}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Submitted</th>
+          <th>Latest admin note</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
+function renderOfficeDashboard(user, submissions) {
+  return pageLayout({
+    title: 'Office dashboard',
+    activePath: '/admin',
+    user,
+    body: `
+      <section>
+        <h2>My submissions</h2>
+        ${renderOfficeSubmissionRows(submissions)}
+      </section>
+      <p><a class="button" href="/admin/content/new">Submit new content</a></p>
+    `,
   });
 }
 
@@ -436,6 +519,72 @@ async function requireOfficeUser(context) {
   }
 
   return user;
+}
+
+async function handleDashboard({ response, pool, user }) {
+  if (user.role === 'admin') {
+    const result = await pool.query(
+      `
+        SELECT
+          (
+            SELECT count(*)::int
+            FROM account_requests
+            WHERE status = 'pending'
+          ) AS pending_account_requests,
+          (
+            SELECT count(*)::int
+            FROM content_versions
+            WHERE status = 'pending_review'
+          ) AS pending_content_reviews,
+          (
+            SELECT count(*)::int
+            FROM content_versions
+            WHERE status = 'published'
+          ) AS published_records
+      `,
+    );
+
+    sendHtml(response, 200, renderAdminDashboard(user, result.rows[0] || {}));
+    return;
+  }
+
+  if (user.role === 'office_user') {
+    const officeId = Number(user.office_id);
+    if (!Number.isInteger(officeId) || officeId < 1) {
+      sendHtml(response, 200, renderOfficeDashboard(user, []));
+      return;
+    }
+
+    const result = await pool.query(
+      `
+        SELECT cv.id,
+               cv.title,
+               ci.content_type,
+               cv.status,
+               cv.submitted_at,
+               latest_note.note AS latest_admin_note
+        FROM content_versions cv
+        JOIN content_items ci ON ci.id = cv.content_item_id
+        LEFT JOIN LATERAL (
+          SELECT rn.note
+          FROM review_notes rn
+          WHERE rn.content_version_id = cv.id
+          ORDER BY rn.created_at DESC, rn.id DESC
+          LIMIT 1
+        ) latest_note ON true
+        WHERE ci.office_id = $1
+          AND cv.submitted_by = $2
+        ORDER BY cv.submitted_at DESC NULLS LAST, cv.id DESC
+        LIMIT 25
+      `,
+      [officeId, user.id],
+    );
+
+    sendHtml(response, 200, renderOfficeDashboard(user, result.rows));
+    return;
+  }
+
+  renderForbidden(response, user);
 }
 
 async function handleAccountRequestsIndex({ response, pool, user }) {
@@ -1029,7 +1178,7 @@ function createAdminRouteHandler(options = {}) {
       const user = await requireAdmin({ request, response, redis: services.redis });
       if (!user) return true;
 
-      sendHtml(response, 200, renderDashboard(user));
+      await handleDashboard({ response, pool: services.pool, user });
       return true;
     }
 
