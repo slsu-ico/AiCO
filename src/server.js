@@ -3,6 +3,9 @@ const { URL } = require('node:url');
 
 const { createInitialSession, handleUserMessage } = require('./conversationEngine');
 const { getConfig } = require('./config');
+const { createAdminRouteHandler } = require('./adminRoutes');
+const { createRedisClient } = require('./cache/redis');
+const { createPool } = require('./db/postgres');
 const { loadServices } = require('./serviceRepository');
 const { sendMessengerMessage } = require('./messengerApi');
 
@@ -38,6 +41,12 @@ function createServer(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
   const services = options.services || loadServices();
   const sessions = options.sessions || new Map();
+  const handleAdminRoutes = createAdminRouteHandler({
+    pool: options.pool,
+    redis: options.redis,
+    sessionSecret: options.sessionSecret,
+    secureCookies: options.secureCookies,
+  });
   const sendMessage = options.sendMessage || (async (recipientId, reply) => {
     await sendMessengerMessage(options.pageAccessToken, recipientId, reply);
   });
@@ -45,63 +54,85 @@ function createServer(options = {}) {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
 
-    if (request.method === 'GET' && url.pathname === '/webhook') {
-      const mode = url.searchParams.get('hub.mode');
-      const token = url.searchParams.get('hub.verify_token');
-      const challenge = url.searchParams.get('hub.challenge');
-
-      if (mode === 'subscribe' && token === verifyToken) {
-        sendText(response, 200, challenge || '');
+    try {
+      if (await handleAdminRoutes(request, response, url)) {
         return;
       }
 
-      sendText(response, 403, 'Forbidden');
-      return;
-    }
+      if (request.method === 'GET' && url.pathname === '/webhook') {
+        const mode = url.searchParams.get('hub.mode');
+        const token = url.searchParams.get('hub.verify_token');
+        const challenge = url.searchParams.get('hub.challenge');
 
-    if (request.method === 'POST' && url.pathname === '/webhook') {
-      let body;
-      try {
-        body = await readJson(request);
-      } catch (error) {
-        sendText(response, 400, 'Invalid JSON');
-        return;
-      }
-
-      if (body.object !== 'page') {
-        sendText(response, 404, 'Not Found');
-        return;
-      }
-
-      const events = body.entry?.flatMap((entry) => entry.messaging || []) || [];
-
-      for (const event of events) {
-        const senderId = event.sender?.id;
-        if (!senderId) continue;
-
-        const session = sessions.get(senderId) || createInitialSession();
-        const incomingText = extractIncomingText(event);
-        const result = handleUserMessage(session, incomingText, services);
-        sessions.set(senderId, result.session);
-
-        for (const reply of result.replies) {
-          await sendMessage(senderId, reply);
+        if (mode === 'subscribe' && token === verifyToken) {
+          sendText(response, 200, challenge || '');
+          return;
         }
+
+        sendText(response, 403, 'Forbidden');
+        return;
       }
 
-      sendText(response, 200, 'EVENT_RECEIVED');
-      return;
-    }
+      if (request.method === 'POST' && url.pathname === '/webhook') {
+        let body;
+        try {
+          body = await readJson(request);
+        } catch (error) {
+          sendText(response, 400, 'Invalid JSON');
+          return;
+        }
 
-    sendText(response, 404, 'Not Found');
+        if (body.object !== 'page') {
+          sendText(response, 404, 'Not Found');
+          return;
+        }
+
+        const events = body.entry?.flatMap((entry) => entry.messaging || []) || [];
+
+        for (const event of events) {
+          const senderId = event.sender?.id;
+          if (!senderId) continue;
+
+          const session = sessions.get(senderId) || createInitialSession();
+          const incomingText = extractIncomingText(event);
+          const result = handleUserMessage(session, incomingText, services);
+          sessions.set(senderId, result.session);
+
+          for (const reply of result.replies) {
+            await sendMessage(senderId, reply);
+          }
+        }
+
+        sendText(response, 200, 'EVENT_RECEIVED');
+        return;
+      }
+
+      sendText(response, 404, 'Not Found');
+    } catch (error) {
+      if (!response.headersSent) {
+        sendText(response, error.statusCode || 500, error.message || 'Internal Server Error');
+      } else {
+        response.end();
+      }
+    }
   });
 }
 
 function startServer() {
   const config = getConfig();
+  const pool = createPool({ databaseUrl: config.databaseUrl });
+  const redis = createRedisClient({ redisUrl: config.redisUrl });
+
+  redis.connect().catch((error) => {
+    console.error('Failed to connect to Redis:', error);
+  });
+
   const server = createServer({
     verifyToken: config.verifyToken,
     pageAccessToken: config.pageAccessToken,
+    pool,
+    redis,
+    sessionSecret: config.sessionSecret,
   });
 
   server.listen(config.port, () => {
