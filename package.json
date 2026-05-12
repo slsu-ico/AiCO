@@ -1,0 +1,14 @@
+{
+  "name": "ico-services-messenger-chatbot",
+  "version": "0.1.0",
+  "description": "Facebook Messenger chatbot trial for SLSU ICO Citizen's Charter services.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
