@@ -6,6 +6,7 @@ const { getConfig } = require('./config');
 const { createAdminRouteHandler } = require('./adminRoutes');
 const { createRedisClient } = require('./cache/redis');
 const { createPool } = require('./db/postgres');
+const { loadPublishedServices } = require('./publishedContentRepository');
 const { loadServices } = require('./serviceRepository');
 const { sendMessengerMessage } = require('./messengerApi');
 
@@ -39,8 +40,16 @@ function extractIncomingText(event) {
 
 function createServer(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
-  const services = options.services || loadServices();
   const sessions = options.sessions || new Map();
+  const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
+
+  async function getChatbotServices() {
+    if (hasInjectedServices) return options.services;
+    if (!options.pool || !options.redis) return loadServices();
+
+    return loadPublishedServices({ pool: options.pool, redis: options.redis });
+  }
+
   const handleAdminRoutes = createAdminRouteHandler({
     pool: options.pool,
     redis: options.redis,
@@ -88,6 +97,7 @@ function createServer(options = {}) {
         }
 
         const events = body.entry?.flatMap((entry) => entry.messaging || []) || [];
+        const services = await getChatbotServices();
 
         for (const event of events) {
           const senderId = event.sender?.id;
@@ -120,6 +130,10 @@ function createServer(options = {}) {
 
 function startServer() {
   const config = getConfig();
+  if (process.env.NODE_ENV === 'production' && config.verifyToken === 'dev-verify-token') {
+    throw new Error('MESSENGER_VERIFY_TOKEN must be set in production.');
+  }
+
   const pool = createPool({ databaseUrl: config.databaseUrl });
   const redis = createRedisClient({ redisUrl: config.redisUrl });
 
