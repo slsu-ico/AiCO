@@ -406,6 +406,167 @@ test('office user submits content for their assigned office as pending review', 
   }
 });
 
+test('authenticated user can create attachment metadata with sanitized original filename and uploaded_by', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 44, office_id: 7 });
+  let attachmentParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, 'JOIN content_items ci')) {
+      assert.deepEqual(params, [901]);
+      return { rows: [{ id: 901, office_id: 7 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO attachments')) {
+      attachmentParams = params;
+      return { rows: [{ id: 123 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/attachments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+      },
+      body: JSON.stringify({
+        linked_type: 'content_version',
+        linked_id: 901,
+        original_filename: '../unsafe\u0000 path/Board\nResolution Final.pdf',
+        file_type: 'application/pdf',
+        file_size: 2048,
+        storage_path: 'uploads/123-board-resolution-final.pdf',
+      }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(payload, { id: 123 });
+    assert.deepEqual(attachmentParams, [
+      'content_version',
+      901,
+      'BoardResolution Final.pdf',
+      'application/pdf',
+      2048,
+      'uploads/123-board-resolution-final.pdf',
+      44,
+    ]);
+  } finally {
+    await close(server);
+  }
+});
+
+test('attachment metadata rejects traversal storage path', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('invalid storage path should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/attachments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+      },
+      body: JSON.stringify({
+        linked_type: 'content_version',
+        linked_id: 901,
+        original_filename: 'Board Resolution Final.pdf',
+        file_type: 'application/pdf',
+        file_size: 2048,
+        storage_path: 'uploads/../private/secret.pdf',
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /valid attachment storage record/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('attachment metadata rejects bogus linked_type', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('invalid linked_type should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/attachments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+      },
+      body: JSON.stringify({
+        linked_type: 'content_item',
+        linked_id: 901,
+        original_filename: 'Board Resolution Final.pdf',
+        file_type: 'application/pdf',
+        file_size: 2048,
+        storage_path: 'uploads/123-board-resolution-final.pdf',
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /valid linked item/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user cannot attach metadata to another office content version', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { office_id: 7 });
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, 'JOIN content_items ci')) {
+      assert.deepEqual(params, [901]);
+      return { rows: [{ id: 901, office_id: 99 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO attachments')) {
+      throw new Error('unauthorized attachment should not be inserted');
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/attachments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+      },
+      body: JSON.stringify({
+        linked_type: 'content_version',
+        linked_id: 901,
+        original_filename: 'Board Resolution Final.pdf',
+        file_type: 'application/pdf',
+        file_size: 2048,
+        storage_path: 'uploads/123-board-resolution-final.pdf',
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /another office/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('office user cannot submit content for another office', async () => {
   const redis = new FakeRedis();
   const cookie = await officeCookie(redis, { office_id: 7 });

@@ -17,6 +17,11 @@ const {
   sendHtml,
 } = require('./httpUtils');
 const { pageLayout } = require('./layout');
+const {
+  isAllowedFileType,
+  isSafeStoragePath,
+  sanitizeOriginalFilename,
+} = require('./uploads');
 
 const VALID_ROLES = new Set(['admin', 'office_user']);
 const VALID_CONTENT_TYPES = new Set([
@@ -27,6 +32,7 @@ const VALID_CONTENT_TYPES = new Set([
   'program',
   'activity',
 ]);
+const VALID_ATTACHMENT_LINKED_TYPES = new Set(['content_version', 'account_request']);
 
 const CONTENT_TYPE_LABELS = {
   citizens_charter_service: "Citizen's Charter service",
@@ -287,6 +293,30 @@ async function readForm(request) {
   return parseUrlEncoded(await readBody(request));
 }
 
+async function readMetadata(request) {
+  const contentType = String(request.headers['content-type'] || '').toLowerCase();
+
+  if (contentType.startsWith('multipart/form-data')) {
+    const error = new Error('Attachment metadata must not be submitted as multipart data.');
+    error.statusCode = 415;
+    throw error;
+  }
+
+  const body = await readBody(request);
+  if (contentType.startsWith('application/json')) {
+    return body ? JSON.parse(body) : {};
+  }
+
+  return parseUrlEncoded(body);
+}
+
+function sendJson(response, statusCode, payload) {
+  response.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+  });
+  response.end(JSON.stringify(payload));
+}
+
 async function currentSession(redis, request) {
   return getSession(redis, request.headers.cookie || '');
 }
@@ -516,6 +546,122 @@ async function handleContentSubmit({ request, response, pool, user }) {
   });
 
   redirect(response, '/admin/content/new?submitted=1');
+}
+
+async function handleAttachmentMetadataCreate({ request, response, pool, user }) {
+  let metadata;
+  try {
+    metadata = await readMetadata(request);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      renderBadRequest(response, 'Attachment metadata must be valid JSON.', user);
+      return;
+    }
+    if (error.statusCode === 415) {
+      response.writeHead(415, {
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      response.end(error.message);
+      return;
+    }
+    throw error;
+  }
+
+  const linkedType = clean(metadata.linked_type);
+  const linkedId = Number(clean(metadata.linked_id));
+  const rawOriginalFilename = clean(metadata.original_filename);
+  const originalFilename = rawOriginalFilename ? sanitizeOriginalFilename(rawOriginalFilename) : '';
+  const fileType = clean(metadata.file_type).toLowerCase();
+  const fileSize = Number(clean(metadata.file_size));
+  const storagePath = clean(metadata.storage_path);
+
+  if (!VALID_ATTACHMENT_LINKED_TYPES.has(linkedType) || !Number.isInteger(linkedId) || linkedId < 1) {
+    renderBadRequest(response, 'A valid linked item is required.', user);
+    return;
+  }
+
+  if (!originalFilename || !isAllowedFileType(fileType)) {
+    renderBadRequest(response, 'A valid attachment file is required.', user);
+    return;
+  }
+
+  if (!Number.isInteger(fileSize) || fileSize < 0 || !isSafeStoragePath(storagePath)) {
+    renderBadRequest(response, 'A valid attachment storage record is required.', user);
+    return;
+  }
+
+  if (linkedType === 'content_version') {
+    const targetResult = await pool.query(
+      `
+        SELECT cv.id, ci.office_id
+        FROM content_versions cv
+        JOIN content_items ci ON ci.id = cv.content_item_id
+        WHERE cv.id = $1
+        LIMIT 1
+      `,
+      [linkedId],
+    );
+    const target = targetResult.rows[0];
+
+    if (!target) {
+      renderBadRequest(response, 'A valid linked item is required.', user);
+      return;
+    }
+
+    if (user.role !== 'admin' && Number(target.office_id) !== Number(user.office_id)) {
+      renderForbidden(response, user, 'You cannot attach files to content from another office.');
+      return;
+    }
+  }
+
+  if (linkedType === 'account_request') {
+    if (user.role !== 'admin') {
+      renderForbidden(response, user, 'Only administrators can attach files to account requests.');
+      return;
+    }
+
+    const targetResult = await pool.query(
+      `
+        SELECT id
+        FROM account_requests
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [linkedId],
+    );
+
+    if (!targetResult.rows[0]) {
+      renderBadRequest(response, 'A valid linked item is required.', user);
+      return;
+    }
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO attachments (
+        linked_type,
+        linked_id,
+        original_filename,
+        file_type,
+        file_size,
+        storage_path,
+        uploaded_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id
+    `,
+    [
+      linkedType,
+      linkedId,
+      originalFilename,
+      fileType,
+      fileSize,
+      storagePath,
+      user.id,
+    ],
+  );
+
+  sendJson(response, 201, { id: result.rows[0].id });
 }
 
 async function handleContentReviewsIndex({ response, pool, user }) {
@@ -926,6 +1072,24 @@ function createAdminRouteHandler(options = {}) {
       }
 
       await handleContentSubmit({
+        request,
+        response,
+        pool: services.pool,
+        user,
+      });
+      return true;
+    }
+
+    if (pathname === '/admin/attachments') {
+      const user = await requireAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'POST') {
+        methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      await handleAttachmentMetadataCreate({
         request,
         response,
         pool: services.pool,
