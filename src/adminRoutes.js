@@ -19,6 +19,23 @@ const {
 const { pageLayout } = require('./layout');
 
 const VALID_ROLES = new Set(['admin', 'office_user']);
+const VALID_CONTENT_TYPES = new Set([
+  'citizens_charter_service',
+  'faq',
+  'event',
+  'project',
+  'program',
+  'activity',
+]);
+
+const CONTENT_TYPE_LABELS = {
+  citizens_charter_service: "Citizen's Charter service",
+  faq: 'FAQ',
+  event: 'Event',
+  project: 'Project',
+  program: 'Program',
+  activity: 'Activity',
+};
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -105,14 +122,14 @@ function renderBadRequest(response, message, user = null) {
   );
 }
 
-function renderForbidden(response, user) {
+function renderForbidden(response, user, message = 'You do not have access to this page.') {
   sendHtml(
     response,
     403,
     pageLayout({
       title: 'Forbidden',
       user,
-      body: '<p>You do not have access to this page.</p>',
+      body: `<p>${escapeHtml(message)}</p>`,
     }),
   );
 }
@@ -166,6 +183,104 @@ function renderAccountRequestRows(rows) {
       <tbody>${body}</tbody>
     </table>
   `;
+}
+
+function contentTypeOptions(selected = '') {
+  return [...VALID_CONTENT_TYPES]
+    .map((type) => {
+      const selectedAttr = selected === type ? ' selected' : '';
+      return `<option value="${escapeHtml(type)}"${selectedAttr}>${escapeHtml(CONTENT_TYPE_LABELS[type])}</option>`;
+    })
+    .join('');
+}
+
+function renderNewContentForm({ user, notice = '' }) {
+  return pageLayout({
+    title: 'New content',
+    activePath: '/admin/content/new',
+    user,
+    notice,
+    body: `
+      <form method="post" action="/admin/content">
+        <input name="office_id" type="hidden" value="${escapeHtml(user.office_id)}">
+        <label>Content type
+          <select id="content_type" name="content_type" required>
+            ${contentTypeOptions()}
+          </select>
+        </label>
+        ${field('Title', 'title', { required: true })}
+        ${field('Body', 'body', { multiline: true, required: true })}
+        ${field('Requirements', 'requirements', { multiline: true })}
+        ${field('Procedure', 'procedure', { multiline: true })}
+        ${field('Fees', 'fees')}
+        ${field('Processing time', 'processing_time')}
+        <button type="submit">Submit for review</button>
+      </form>
+    `,
+  });
+}
+
+function renderContentReviewRows(rows) {
+  if (rows.length === 0) {
+    return '<p>No content submissions are waiting for review.</p>';
+  }
+
+  const body = rows.map((review) => `
+    <tr>
+      <td><a href="/admin/reviews/${escapeHtml(review.id)}">${escapeHtml(review.title)}</a></td>
+      <td>${escapeHtml(CONTENT_TYPE_LABELS[review.content_type] || review.content_type)}</td>
+      <td>${escapeHtml(review.office_name || '')}</td>
+      <td>${escapeHtml(review.submitted_at || '')}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Office</th>
+          <th>Submitted</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
+function renderContentReviewDetail(review, user) {
+  const payload = JSON.stringify(review.structured_payload || {}, null, 2);
+
+  return pageLayout({
+    title: 'Content review',
+    activePath: '/admin/reviews',
+    user,
+    body: `
+      <p><strong>${escapeHtml(review.title)}</strong></p>
+      <p>${escapeHtml(CONTENT_TYPE_LABELS[review.content_type] || review.content_type)} from ${escapeHtml(review.office_name || '')}</p>
+      <p>Status: ${escapeHtml(review.status)}</p>
+      <section>
+        <h2>Body</h2>
+        <p>${escapeHtml(review.body || '')}</p>
+      </section>
+      <section>
+        <h2>Structured payload</h2>
+        <pre>${escapeHtml(payload)}</pre>
+      </section>
+      <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/approve">
+        <button type="submit">Approve and publish</button>
+      </form>
+      <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/needs-revision">
+        <textarea name="note" placeholder="Review note" required></textarea>
+        <button type="submit">Needs revision</button>
+      </form>
+      <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/reject">
+        <textarea name="note" placeholder="Review note" required></textarea>
+        <button class="button-danger" type="submit">Reject</button>
+      </form>
+    `,
+  });
 }
 
 async function readForm(request) {
@@ -281,6 +396,18 @@ async function requireReviewAdmin(context) {
   return user;
 }
 
+async function requireOfficeUser(context) {
+  const user = await requireAdmin(context);
+  if (!user) return null;
+
+  if (user.role !== 'office_user') {
+    renderForbidden(context.response, user);
+    return null;
+  }
+
+  return user;
+}
+
 async function handleAccountRequestsIndex({ response, pool, user }) {
   const result = await pool.query(
     `
@@ -302,6 +429,257 @@ async function handleAccountRequestsIndex({ response, pool, user }) {
   );
 }
 
+function buildContentPayload({ form, user, contentType, title, body }) {
+  const payload = {
+    title,
+    body,
+    office_id: Number(user.office_id),
+    content_type: contentType,
+  };
+
+  if (contentType === 'citizens_charter_service') {
+    for (const key of ['requirements', 'procedure', 'fees', 'processing_time', 'service_name']) {
+      const value = clean(form[key]);
+      if (value) payload[key] = value;
+    }
+  }
+
+  return payload;
+}
+
+async function handleContentSubmit({ request, response, pool, user }) {
+  const form = await readForm(request);
+  const officeId = Number(user.office_id);
+  const requestedOfficeId = clean(form.office_id);
+  const contentType = clean(form.content_type);
+  const title = clean(form.title);
+  const body = clean(form.body);
+
+  if (!Number.isInteger(officeId) || officeId < 1) {
+    renderForbidden(response, user, 'Content can only be submitted for an assigned office.');
+    return;
+  }
+
+  if (requestedOfficeId && Number(requestedOfficeId) !== officeId) {
+    renderForbidden(response, user, 'Content can only be submitted for your assigned office.');
+    return;
+  }
+
+  if (!VALID_CONTENT_TYPES.has(contentType)) {
+    renderBadRequest(response, 'A valid content type is required.', user);
+    return;
+  }
+
+  if (!title || !body) {
+    renderBadRequest(response, 'Title and body are required.', user);
+    return;
+  }
+
+  const payload = buildContentPayload({ form, user, contentType, title, body });
+
+  await withTransaction(pool, async (client) => {
+    const itemResult = await client.query(
+      `
+        INSERT INTO content_items (office_id, content_type, created_by)
+        VALUES ($1, $2, $3)
+        RETURNING id
+      `,
+      [officeId, contentType, user.id],
+    );
+    const contentItem = itemResult.rows[0];
+
+    await client.query(
+      `
+        INSERT INTO content_versions (
+          content_item_id,
+          version_number,
+          status,
+          title,
+          body,
+          structured_payload,
+          submitted_by,
+          submitted_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        RETURNING id
+      `,
+      [
+        contentItem.id,
+        1,
+        'pending_review',
+        title,
+        body,
+        payload,
+        user.id,
+      ],
+    );
+  });
+
+  redirect(response, '/admin/content/new?submitted=1');
+}
+
+async function handleContentReviewsIndex({ response, pool, user }) {
+  const result = await pool.query(
+    `
+      SELECT cv.id,
+             cv.title,
+             ci.content_type,
+             o.name AS office_name,
+             cv.submitted_at
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      LEFT JOIN offices o ON o.id = ci.office_id
+      WHERE cv.status = 'pending_review'
+      ORDER BY cv.submitted_at ASC NULLS LAST, cv.id ASC
+    `,
+  );
+
+  sendHtml(
+    response,
+    200,
+    pageLayout({
+      title: 'Content reviews',
+      activePath: '/admin/reviews',
+      user,
+      body: renderContentReviewRows(result.rows),
+    }),
+  );
+}
+
+async function handleContentReviewDetail({ response, pool, user, id }) {
+  const result = await pool.query(
+    `
+      SELECT cv.id,
+             cv.title,
+             cv.body,
+             cv.status,
+             cv.structured_payload,
+             cv.submitted_at,
+             ci.office_id,
+             ci.content_type,
+             o.name AS office_name
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      LEFT JOIN offices o ON o.id = ci.office_id
+      WHERE cv.id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+  const review = result.rows[0];
+
+  if (!review) {
+    notFound(response);
+    return;
+  }
+
+  sendHtml(response, 200, renderContentReviewDetail(review, user));
+}
+
+async function lockContentVersion(client, id) {
+  const result = await client.query(
+    `
+      SELECT id, content_item_id, status
+      FROM content_versions
+      WHERE id = $1
+      FOR UPDATE
+    `,
+    [id],
+  );
+  const version = result.rows[0];
+
+  if (!version) {
+    const error = new Error('Content version not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (version.status !== 'pending_review') {
+    const error = new Error('Only pending review content can be reviewed.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return version;
+}
+
+async function invalidatePublishedCache(redis) {
+  await redis.del('published:services');
+  await redis.del('published:faqs');
+}
+
+async function handleContentApprove({ response, pool, redis, user, id }) {
+  await withTransaction(pool, async (client) => {
+    const version = await lockContentVersion(client, id);
+
+    await client.query(
+      `
+        UPDATE content_versions
+        SET status = 'published',
+            reviewed_by = $2,
+            reviewed_at = now(),
+            published_at = now(),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, content_item_id
+      `,
+      [id, user.id],
+    );
+
+    await client.query(
+      `
+        UPDATE content_items
+        SET current_published_version_id = $2,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [version.content_item_id, id],
+    );
+  });
+
+  await invalidatePublishedCache(redis);
+  redirect(response, '/admin/reviews');
+}
+
+async function handleContentReviewStatus({ request, response, pool, user, id, status }) {
+  const form = await readForm(request);
+  const note = clean(form.note);
+
+  if (!note) {
+    renderBadRequest(response, 'Review note is required.', user);
+    return;
+  }
+
+  await withTransaction(pool, async (client) => {
+    await lockContentVersion(client, id);
+
+    await client.query(
+      `
+        UPDATE content_versions
+        SET status = $2,
+            reviewed_by = $3,
+            reviewed_at = now(),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [id, status, user.id],
+    );
+
+    await client.query(
+      `
+        INSERT INTO review_notes (content_version_id, reviewer_id, action, note)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+      `,
+      [id, user.id, status, note],
+    );
+  });
+
+  redirect(response, `/admin/reviews/${id}`);
+}
+
 function parseRequestAction(pathname) {
   const match = pathname.match(/^\/admin\/account-requests\/(\d+)\/(approve|reject|needs-info)$/);
   if (!match) return null;
@@ -309,6 +687,20 @@ function parseRequestAction(pathname) {
     id: Number(match[1]),
     action: match[2],
   };
+}
+
+function parseContentReviewAction(pathname) {
+  const match = pathname.match(/^\/admin\/reviews\/(\d+)\/(approve|reject|needs-revision)$/);
+  if (!match) return null;
+  return {
+    id: Number(match[1]),
+    action: match[2],
+  };
+}
+
+function parseContentReviewDetail(pathname) {
+  const match = pathname.match(/^\/admin\/reviews\/(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 async function handleApprove({ request, response, pool, user, id }) {
@@ -505,6 +897,104 @@ function createAdminRouteHandler(options = {}) {
       }
 
       await handleAccountRequestsIndex({ response, pool: services.pool, user });
+      return true;
+    }
+
+    if (pathname === '/admin/content/new') {
+      const user = await requireOfficeUser({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      const notice = url.searchParams.get('submitted') === '1'
+        ? 'Your content has been submitted for review.'
+        : '';
+      sendHtml(response, 200, renderNewContentForm({ user, notice }));
+      return true;
+    }
+
+    if (pathname === '/admin/content') {
+      const user = await requireOfficeUser({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'POST') {
+        methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      await handleContentSubmit({
+        request,
+        response,
+        pool: services.pool,
+        user,
+      });
+      return true;
+    }
+
+    if (pathname === '/admin/reviews') {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      await handleContentReviewsIndex({ response, pool: services.pool, user });
+      return true;
+    }
+
+    const contentReviewId = parseContentReviewDetail(pathname);
+    if (contentReviewId !== null) {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      await handleContentReviewDetail({
+        response,
+        pool: services.pool,
+        user,
+        id: contentReviewId,
+      });
+      return true;
+    }
+
+    const contentReviewAction = parseContentReviewAction(pathname);
+    if (contentReviewAction) {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'POST') {
+        methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      if (contentReviewAction.action === 'approve') {
+        await handleContentApprove({
+          response,
+          pool: services.pool,
+          redis: services.redis,
+          user,
+          id: contentReviewAction.id,
+        });
+        return true;
+      }
+
+      await handleContentReviewStatus({
+        request,
+        response,
+        pool: services.pool,
+        user,
+        id: contentReviewAction.id,
+        status: contentReviewAction.action === 'reject' ? 'rejected' : 'needs_revision',
+      });
       return true;
     }
 

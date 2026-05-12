@@ -7,6 +7,7 @@ const { createServer } = require('../src/server');
 class FakeRedis {
   constructor() {
     this.store = new Map();
+    this.delCalls = [];
   }
 
   async set(key, value) {
@@ -19,6 +20,7 @@ class FakeRedis {
   }
 
   async del(key) {
+    this.delCalls.push(key);
     return this.store.delete(key) ? 1 : 0;
   }
 }
@@ -87,6 +89,7 @@ function createAdminServer({ pool, redis = new FakeRedis() }) {
 async function adminCookie(redis, user = {}) {
   const session = await createSession(redis, {
     id: 10,
+    office_id: 1,
     email: 'admin@slsu.edu.ph',
     full_name: 'Bootstrap Admin',
     role: 'admin',
@@ -94,6 +97,17 @@ async function adminCookie(redis, user = {}) {
   });
 
   return session.cookieHeader.split(';')[0];
+}
+
+async function officeCookie(redis, user = {}) {
+  return adminCookie(redis, {
+    id: 22,
+    office_id: 7,
+    email: 'editor@slsu.edu.ph',
+    full_name: 'Office Editor',
+    role: 'office_user',
+    ...user,
+  });
 }
 
 test('renders the public account request form', async () => {
@@ -303,6 +317,326 @@ test('rejecting an account request without an admin note returns 400', async () 
 
     assert.equal(response.status, 400);
     assert.match(html, /Admin note is required/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('renders new content form only for authenticated office users', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('new content form should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const unauthenticated = await fetch(`${baseUrl}/admin/content/new`, { redirect: 'manual' });
+    assert.equal(unauthenticated.status, 303);
+    assert.equal(unauthenticated.headers.get('location'), '/login');
+
+    const response = await fetch(`${baseUrl}/admin/content/new`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /New content/);
+    assert.match(html, /name="content_type"/);
+    assert.match(html, /citizens_charter_service/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user submits content for their assigned office as pending review', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { office_id: 7 });
+  let itemParams;
+  let versionParams;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'INSERT INTO content_items')) {
+      itemParams = params;
+      return { rows: [{ id: 900 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO content_versions')) {
+      versionParams = params;
+      return { rows: [{ id: 901 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        office_id: '7',
+        content_type: 'faq',
+        title: 'How do I request international documents?',
+        body: 'Submit the request form and wait for confirmation.',
+      }),
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/content/new?submitted=1');
+    assert.deepEqual(itemParams, [7, 'faq', 22]);
+    assert.equal(versionParams[0], 900);
+    assert.equal(versionParams[1], 1);
+    assert.equal(versionParams[2], 'pending_review');
+    assert.equal(versionParams[3], 'How do I request international documents?');
+    assert.equal(versionParams[4], 'Submit the request form and wait for confirmation.');
+    assert.deepEqual(versionParams[5], {
+      title: 'How do I request international documents?',
+      body: 'Submit the request form and wait for confirmation.',
+      office_id: 7,
+      content_type: 'faq',
+    });
+    assert.equal(versionParams[6], 22);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user cannot submit content for another office', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { office_id: 7 });
+  const pool = createFakePool(() => {
+    throw new Error('cross-office submission should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        office_id: '99',
+        content_type: 'program',
+        title: 'Exchange Program',
+        body: 'Program details.',
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /assigned office/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user cannot access admin content review routes', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('office users should not query admin reviews');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /do not have access/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin can view pending content review list and detail', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, "cv.status = 'pending_review'")) {
+      return {
+        rows: [{
+          id: 55,
+          title: 'Scholarship FAQ',
+          content_type: 'faq',
+          office_name: 'International Office',
+          submitted_at: '2026-05-12T02:00:00.000Z',
+        }],
+      };
+    }
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, 'WHERE cv.id = $1')) {
+      assert.deepEqual(params, [55]);
+      return {
+        rows: [{
+          id: 55,
+          title: 'Scholarship FAQ',
+          body: 'Bring the scholarship certificate.',
+          status: 'pending_review',
+          content_type: 'faq',
+          office_id: 7,
+          office_name: 'International Office',
+          structured_payload: { title: 'Scholarship FAQ' },
+          submitted_at: '2026-05-12T02:00:00.000Z',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const list = await fetch(`${baseUrl}/admin/reviews`, { headers: { cookie } });
+    const listHtml = await list.text();
+    assert.equal(list.status, 200);
+    assert.match(listHtml, /Content reviews/);
+    assert.match(listHtml, /Scholarship FAQ/);
+
+    const detail = await fetch(`${baseUrl}/admin/reviews/55`, { headers: { cookie } });
+    const detailHtml = await detail.text();
+    assert.equal(detail.status, 200);
+    assert.match(detailHtml, /Bring the scholarship certificate/);
+    assert.match(detailHtml, /name="note"/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin approval publishes content and invalidates published caches', async () => {
+  const redis = new FakeRedis();
+  await redis.set('published:services', 'cached services');
+  await redis.set('published:faqs', 'cached faqs');
+  const cookie = await adminCookie(redis);
+  let versionUpdateParams;
+  let itemUpdateParams;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      assert.deepEqual(params, [55]);
+      return {
+        rows: [{
+          id: 55,
+          content_item_id: 90,
+          status: 'pending_review',
+        }],
+      };
+    }
+    if (sqlIncludes(text, "SET status = 'published'")) {
+      versionUpdateParams = params;
+      return { rows: [{ id: 55, content_item_id: 90 }] };
+    }
+    if (sqlIncludes(text, 'current_published_version_id = $2')) {
+      itemUpdateParams = params;
+      return { rows: [{ id: 90 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/approve`, {
+      method: 'POST',
+      headers: { cookie },
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/reviews');
+    assert.deepEqual(versionUpdateParams, [55, 10]);
+    assert.deepEqual(itemUpdateParams, [90, 55]);
+    assert.equal(await redis.get('published:services'), null);
+    assert.equal(await redis.get('published:faqs'), null);
+    assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
+  } finally {
+    await close(server);
+  }
+});
+
+test('reject and needs-revision review actions require notes', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('review action without a note should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    for (const action of ['reject', 'needs-revision']) {
+      const response = await fetch(`${baseUrl}/admin/reviews/55/${action}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie,
+        },
+        body: form({ note: '   ' }),
+      });
+      const html = await response.text();
+
+      assert.equal(response.status, 400);
+      assert.match(html, /Review note is required/);
+    }
+  } finally {
+    await close(server);
+  }
+});
+
+test('needs-revision review action stores reviewer note', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  let versionUpdateParams;
+  let noteParams;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return {
+        rows: [{
+          id: 55,
+          content_item_id: 90,
+          status: 'pending_review',
+        }],
+      };
+    }
+    if (sqlIncludes(text, 'UPDATE content_versions') && sqlIncludes(text, 'status = $2')) {
+      versionUpdateParams = params;
+      return { rows: [{ id: 55 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO review_notes')) {
+      noteParams = params;
+      return { rows: [{ id: 500 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/needs-revision`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ note: 'Please add processing time and requirements.' }),
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/reviews/55');
+    assert.deepEqual(versionUpdateParams, [55, 'needs_revision', 10]);
+    assert.deepEqual(noteParams, [55, 10, 'needs_revision', 'Please add processing time and requirements.']);
   } finally {
     await close(server);
   }
