@@ -1,0 +1,11 @@
+.env
+node_modules/
+.superpowers/
+
+uploads/*
+!uploads/.gitkeep
+
+*.log
+logs/
+tmp/
+temp/
