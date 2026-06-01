@@ -25,7 +25,7 @@ test('renders a service guide when a service is selected', () => {
 
   assert.equal(result.session.state, 'viewing_service');
   assert.match(result.replies[0].text, /Request for posting and\/or email blast/);
-  assert.match(result.replies[0].text, /https:\/\/bit\.ly\/DisseminationRequestICO/);
+  assert.match(result.replies[0].text, /https:\/\/forms\.gle\/CsJsfxNxSFt4Swo38/);
   assert.match(result.replies[0].text, /Fees: None/);
   assert.match(result.replies[0].text, /Processing time: 30 minutes/);
 });
@@ -36,7 +36,7 @@ test('matches free-text questions to a service guide', () => {
 
   assert.equal(result.session.state, 'viewing_service');
   assert.match(result.replies[0].text, /Request for audiovisual production/);
-  assert.match(result.replies[0].text, /https:\/\/bit\.ly\/AVPRequestICO/);
+  assert.match(result.replies[0].text, /https:\/\/forms\.gle\/CsJsfxNxSFt4Swo38/);
 });
 
 test('hands off when free text is outside the charter', () => {
