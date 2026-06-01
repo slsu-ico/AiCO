@@ -137,6 +137,80 @@ cd .\scripts
 
 If you want to set the environment variables and deploy in one step, use the helper script created in `scripts/deploy-prod.ps1` after you have the required environment values set in your shell.
 
+### Provisioning Supabase + Upstash
+
+The deployed app needs two managed services:
+
+- `DATABASE_URL` from a hosted PostgreSQL provider such as Supabase
+- `REDIS_URL` from a managed Redis provider such as Upstash
+
+#### Supabase provisioning
+
+1. Create a Supabase project at https://app.supabase.com.
+2. Open the project and go to Settings > Database > Connection Pooling or Connection string.
+3. Copy the `postgres://...` connection string.
+4. In your local shell or deployment environment, set:
+
+```powershell
+$env:DATABASE_URL = 'postgres://...'
+```
+
+5. Run migrations and seed the database against Supabase:
+
+```powershell
+cd ..
+npm run migrate
+npm run seed
+```
+
+6. Confirm the required tables exist and the bootstrap admin was created.
+
+#### Upstash Redis provisioning
+
+1. Create an Upstash Redis database at https://console.upstash.com.
+2. Choose the Kafka-free Redis plan or the free tier.
+3. Copy the `REDIS_URL` value from the connection details.
+4. In your local shell or deployment environment, set:
+
+```powershell
+$env:REDIS_URL = 'rediss://...'
+```
+
+5. Verify connectivity by running a quick Redis check if you want:
+
+```powershell
+node -e "const { createClient } = require('redis'); const r = createClient({ url: process.env.REDIS_URL }); r.connect().then(()=>console.log('ok')).catch(console.error).finally(()=>r.disconnect())"
+```
+
+#### Wire the cloud services into Vercel
+
+Once you have the values:
+
+```powershell
+$env:MESSENGER_VERIFY_TOKEN = 'your-verify-token'
+$env:PAGE_ACCESS_TOKEN = 'your-page-access-token'
+$env:DATABASE_URL = 'your-supabase-connection-string'
+$env:REDIS_URL = 'your-upstash-connection-string'
+$env:SESSION_SECRET = 'your-long-secret'
+$env:BOOTSTRAP_ADMIN_EMAIL = 'admin@slsu.edu.ph'
+$env:BOOTSTRAP_ADMIN_PASSWORD = 'your-temporary-password'
+```
+
+Then run:
+
+```powershell
+cd .\scripts
+.\deploy-prod.ps1
+```
+
+If you prefer manual Vercel configuration, add these production variables in the Vercel dashboard under Project Settings > Environment Variables.
+
+#### Notes
+
+- Supabase provides Postgres but not Redis, so Upstash or another Redis provider is required.
+- The app will fail fast in production if `DATABASE_URL`, `REDIS_URL`, `PAGE_ACCESS_TOKEN`, `MESSENGER_VERIFY_TOKEN`, or `SESSION_SECRET` are missing.
+- Use `BOOTSTRAP_ADMIN_PASSWORD` only for initial seeding. After you create a proper admin account, rotate or remove the bootstrap credentials.
+
 This script adds the following production variables to the linked Vercel project under `slsu-icos-projects`:
 
 - `MESSENGER_VERIFY_TOKEN`

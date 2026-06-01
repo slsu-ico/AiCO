@@ -27,6 +27,8 @@ postgres://postgres:postgres@localhost:5432/aico
 redis://localhost:6379
 ```
 
+For cloud hosting, use a managed Postgres provider such as Supabase, Neon, or AWS RDS, and a managed Redis provider such as Upstash, Redis Enterprise, or Amazon MemoryDB.
+
 Copy the example environment file as a local reference:
 
 ```powershell
