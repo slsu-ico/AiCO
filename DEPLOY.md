@@ -119,16 +119,56 @@ This repo can be deployed on Vercel as a single serverless function with Supabas
 ### Vercel setup
 
 1. Create a Vercel project and connect this repository.
-2. Add the required environment variables in the Vercel dashboard.
+2. Add the required environment variables in the Vercel dashboard or use the helper script below.
 3. Deploy the project.
 
 The `vercel.json` file rewrites all requests to `api/index.js`, so the admin routes and `/webhook` endpoint work through Vercel serverless functions.
+
+#### Helper script for Vercel env vars
+
+If you have the production environment values available in your shell, run:
+
+```powershell
+cd .\scripts
+.\setup-vercel-env.ps1
+```
+
+This script adds the following production variables to the linked Vercel project under `slsu-icos-projects`:
+
+- `MESSENGER_VERIFY_TOKEN`
+- `PAGE_ACCESS_TOKEN`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `UPLOAD_DIR`
+- `SESSION_SECRET`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+- `AI_FALLBACK_ENABLED`
 
 ### Supabase setup
 
 1. Create a Supabase project.
 2. Copy the Supabase Postgres connection string into `DATABASE_URL`.
-3. Run `npm run migrate` and `npm run seed` against the Supabase database.
+3. Ensure `BOOTSTRAP_ADMIN_PASSWORD` is set for seeding.
+4. Run migrations and seed locally against Supabase.
+
+#### Helper script for database initialization
+
+If the required values are available in your shell, run:
+
+```powershell
+cd .\scripts
+.\run-db-init.ps1
+```
+
+This script executes:
+
+```powershell
+npm run migrate
+npm run seed
+```
+
+It uses the current shell environment variables, so make sure `DATABASE_URL` and `BOOTSTRAP_ADMIN_PASSWORD` are set before running.
 
 ## Troubleshooting
 
