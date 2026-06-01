@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "migrate": "node src/db/migrate.js",
+    "enable-rls": "node scripts/enable-rls.js",
     "seed": "node src/db/seed.js",
     "start": "node src/server.js",
     "test": "node --test"

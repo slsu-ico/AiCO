@@ -109,6 +109,22 @@ test('schema defines review notes and generic attachment metadata', () => {
   assertColumn(attachments, 'created_at', 'timestamptz\\s+NOT NULL\\s+DEFAULT now\\(\\)');
 });
 
+test('schema enables row level security on admin tables for Supabase PostgREST', () => {
+  const schema = readSchema();
+
+  for (const table of [
+    'offices',
+    'users',
+    'account_requests',
+    'content_items',
+    'content_versions',
+    'review_notes',
+    'attachments',
+  ]) {
+    assert.match(schema, new RegExp(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`, 'i'));
+  }
+});
+
 test('schema defines required lookup indexes', () => {
   const schema = readSchema();
 

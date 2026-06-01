@@ -109,3 +109,14 @@ CREATE INDEX IF NOT EXISTS idx_users_email_active ON users(email) WHERE active =
 CREATE INDEX IF NOT EXISTS idx_content_items_office_type ON content_items(office_id, content_type);
 CREATE INDEX IF NOT EXISTS idx_content_versions_status ON content_versions(status);
 CREATE INDEX IF NOT EXISTS idx_content_versions_item_status ON content_versions(content_item_id, status);
+
+-- Supabase exposes public tables via PostgREST. This app uses DATABASE_URL (server-side
+-- postgres), not the anon/authenticated API. Enable RLS with no permissive policies so
+-- anon/authenticated cannot read or write; the backend connection bypasses RLS as postgres.
+ALTER TABLE offices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE review_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attachments ENABLE ROW LEVEL SECURITY;
