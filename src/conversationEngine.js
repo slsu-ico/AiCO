@@ -52,6 +52,21 @@ function serviceListReply(audience, services = loadServices()) {
   };
 }
 
+function serviceListAllReply(services = loadServices()) {
+  const lines = services.map((service, index) => `${index + 1}. ${service.service_name}`);
+
+  return {
+    text: [
+      'Here are the ICO services:',
+      '',
+      ...lines,
+      '',
+      'Please choose a service.',
+    ].join('\n'),
+    quickReplies: services.map((service) => quickReply(service.service_name, servicePayload(service))),
+  };
+}
+
 function listItems(items) {
   return items.map((item) => `- ${item}`).join('\n');
 }
@@ -129,8 +144,8 @@ function handleUserMessage(session, message, services = loadServices()) {
 
   if (!input || input === 'BACK_TO_START') {
     return {
-      session: { ...createInitialSession(), state: 'selecting_audience' },
-      replies: [audienceReply()],
+      session: { ...createInitialSession(), state: 'selecting_service' },
+      replies: [serviceListAllReply(services)],
     };
   }
 
@@ -144,7 +159,7 @@ function handleUserMessage(session, message, services = loadServices()) {
   if (input === 'BACK_TO_SERVICES' && current.audience) {
     return {
       session: { ...current, state: 'selecting_service' },
-      replies: [serviceListReply(current.audience, services)],
+      replies: [serviceListAllReply(services)],
     };
   }
 
@@ -171,24 +186,11 @@ function handleUserMessage(session, message, services = loadServices()) {
 
   if (input.toLowerCase() === 'hello' || input.toLowerCase() === 'hi') {
     return {
-      session: { ...current, state: 'selecting_audience' },
-      replies: [audienceReply()],
+      session: { ...current, state: 'selecting_service' },
+      replies: [serviceListAllReply(services)],
     };
   }
-
-  if (isInternalSelection(input)) {
-    return {
-      session: { ...current, audience: 'internal', state: 'selecting_service' },
-      replies: [serviceListReply('internal', services)],
-    };
-  }
-
-  if (isExternalSelection(input)) {
-    return {
-      session: { ...current, audience: 'external', state: 'selecting_service' },
-      replies: [serviceListReply('external', services)],
-    };
-  }
+  // previous audience selection removed: always show services list or match by free text
 
   const matches = searchServices(input, services);
   if (matches.length > 0) {

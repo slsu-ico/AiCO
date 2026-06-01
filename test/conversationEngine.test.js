@@ -10,31 +10,10 @@ test('starts with requester type choices', () => {
   const session = createInitialSession();
   const result = handleUserMessage(session, 'hello');
 
-  assert.equal(result.session.state, 'selecting_audience');
-  assert.match(result.replies[0].text, /SLSU internal unit\/office/i);
-  assert.deepEqual(
-    result.replies[0].quickReplies.map((reply) => reply.payload),
-    ['AUDIENCE_INTERNAL', 'AUDIENCE_EXTERNAL']
-  );
-});
-
-test('shows internal services after internal audience selection', () => {
-  const session = createInitialSession();
-  const result = handleUserMessage(session, 'AUDIENCE_INTERNAL');
-
-  assert.equal(result.session.audience, 'internal');
   assert.equal(result.session.state, 'selecting_service');
-  assert.equal(result.replies[0].quickReplies.length, 7);
-  assert.ok(result.replies[0].text.includes('Provision of training and/or speakership'));
-});
-
-test('shows external services after external audience selection', () => {
-  const session = createInitialSession();
-  const result = handleUserMessage(session, 'external partner');
-
-  assert.equal(result.session.audience, 'external');
-  assert.equal(result.replies[0].quickReplies.length, 2);
-  assert.ok(result.replies[0].text.includes('Request for documentation services'));
+  assert.match(result.replies[0].text, /ICO services|Here are the ICO services/);
+  // quickReplies are SERVICE_<id> payloads
+  assert.ok(Array.isArray(result.replies[0].quickReplies));
 });
 
 test('renders a service guide when a service is selected', () => {
