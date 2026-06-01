@@ -96,6 +96,40 @@ After deployment, verify:
 - the app can connect to PostgreSQL and Redis
 - published content is served only from approved records
 
+## Vercel + Supabase deployment
+
+This repo can be deployed on Vercel as a single serverless function with Supabase providing the PostgreSQL database.
+
+### What is required
+
+- `DATABASE_URL` from Supabase Postgres
+- `REDIS_URL` from a managed Redis provider such as Upstash, Redis Enterprise, or another external Redis instance
+- `PAGE_ACCESS_TOKEN`
+- `MESSENGER_VERIFY_TOKEN`
+- `SESSION_SECRET`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+
+### Important notes
+
+- Vercel does not provide persistent local disk storage for uploaded files. The app currently uses local file metadata for attachments only, so persistent file uploads require an external storage provider or app changes.
+- Chatbot sessions are persisted in Redis when `REDIS_URL` is configured, which is essential for correct behavior on serverless platforms.
+- Supabase provides Postgres, but not Redis. A separate Redis service is required for cache and admin sessions.
+
+### Vercel setup
+
+1. Create a Vercel project and connect this repository.
+2. Add the required environment variables in the Vercel dashboard.
+3. Deploy the project.
+
+The `vercel.json` file rewrites all requests to `api/index.js`, so the admin routes and `/webhook` endpoint work through Vercel serverless functions.
+
+### Supabase setup
+
+1. Create a Supabase project.
+2. Copy the Supabase Postgres connection string into `DATABASE_URL`.
+3. Run `npm run migrate` and `npm run seed` against the Supabase database.
+
 ## Troubleshooting
 
 - If tests fail locally, use `npm test`.

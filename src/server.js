@@ -4,7 +4,7 @@ const { URL } = require('node:url');
 const { createInitialSession, handleUserMessage } = require('./conversationEngine');
 const { getConfig } = require('./config');
 const { createAdminRouteHandler } = require('./adminRoutes');
-const { createRedisClient } = require('./cache/redis');
+const { createRedisClient, getJson, setJson } = require('./cache/redis');
 const { createPool } = require('./db/postgres');
 const { loadPublishedServices } = require('./publishedContentRepository');
 const { loadServices } = require('./serviceRepository');
@@ -31,6 +31,8 @@ function readJson(request) {
   });
 }
 
+const BOT_SESSION_TTL_SECONDS = 60 * 60;
+
 function extractIncomingText(event) {
   if (event.message?.quick_reply?.payload) return event.message.quick_reply.payload;
   if (event.message?.text) return event.message.text;
@@ -38,9 +40,9 @@ function extractIncomingText(event) {
   return '';
 }
 
-function createServer(options = {}) {
+function createRequestHandler(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
-  const sessions = options.sessions || new Map();
+  const sessions = new Map();
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
 
   async function getChatbotServices() {
@@ -50,17 +52,34 @@ function createServer(options = {}) {
     return loadPublishedServices({ pool: options.pool, redis: options.redis });
   }
 
+  async function getBotSession(senderId) {
+    if (!senderId) return null;
+    if (!options.redis) return sessions.get(senderId) || null;
+    return getJson(options.redis, `bot_session:${senderId}`);
+  }
+
+  async function setBotSession(senderId, session) {
+    if (!senderId) return;
+    if (!options.redis) {
+      sessions.set(senderId, session);
+      return;
+    }
+
+    await setJson(options.redis, `bot_session:${senderId}`, session, { ttlSeconds: BOT_SESSION_TTL_SECONDS });
+  }
+
   const handleAdminRoutes = createAdminRouteHandler({
     pool: options.pool,
     redis: options.redis,
     sessionSecret: options.sessionSecret,
     secureCookies: options.secureCookies,
   });
+
   const sendMessage = options.sendMessage || (async (recipientId, reply) => {
     await sendMessengerMessage(options.pageAccessToken, recipientId, reply);
   });
 
-  return http.createServer(async (request, response) => {
+  return async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
 
     try {
@@ -103,10 +122,10 @@ function createServer(options = {}) {
           const senderId = event.sender?.id;
           if (!senderId) continue;
 
-          const session = sessions.get(senderId) || createInitialSession();
+          const session = (await getBotSession(senderId)) || createInitialSession();
           const incomingText = extractIncomingText(event);
           const result = handleUserMessage(session, incomingText, services);
-          sessions.set(senderId, result.session);
+          await setBotSession(senderId, result.session);
 
           for (const reply of result.replies) {
             await sendMessage(senderId, reply);
@@ -125,7 +144,11 @@ function createServer(options = {}) {
         response.end();
       }
     }
-  });
+  };
+}
+
+function createServer(options = {}) {
+  return http.createServer(createRequestHandler(options));
 }
 
 function startServer() {
@@ -162,6 +185,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createRequestHandler,
   createServer,
   extractIncomingText,
   startServer,
