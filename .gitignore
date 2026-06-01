@@ -11,3 +11,5 @@ uploads/*
 logs/
 tmp/
 temp/
+
+.vercel
