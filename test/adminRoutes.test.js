@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { createSession, hashPassword } = require('../src/auth');
@@ -75,15 +78,44 @@ function createFakePool(handler) {
   };
 }
 
-function createAdminServer({ pool, redis = new FakeRedis() }) {
+function createAdminServer({ pool, redis = new FakeRedis(), uploadDir }) {
   return createServer({
     pool,
     redis,
+    uploadDir,
     services: [],
     sessionSecret: 'test-session-secret',
     verifyToken: 'secret',
     sendMessage: async () => {},
   });
+}
+
+async function tempUploadDir() {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'aico-admin-uploads-'));
+}
+
+function multipartBody(parts, boundary = '----aico-test-boundary') {
+  const chunks = [];
+
+  for (const part of parts) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`));
+    if (part.filename) {
+      chunks.push(Buffer.from(
+        `Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`
+        + `Content-Type: ${part.contentType || 'application/octet-stream'}\r\n\r\n`,
+      ));
+      chunks.push(Buffer.isBuffer(part.value) ? part.value : Buffer.from(String(part.value)));
+      chunks.push(Buffer.from('\r\n'));
+    } else {
+      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value}\r\n`));
+    }
+  }
+
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return {
+    body: Buffer.concat(chunks),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 async function adminCookie(redis, user = {}) {
@@ -436,6 +468,8 @@ test('renders new content form only for authenticated office users', async () =>
     assert.match(html, /New content/);
     assert.match(html, /name="content_type"/);
     assert.match(html, /citizens_charter_service/);
+    assert.match(html, /enctype="multipart\/form-data"/);
+    assert.match(html, /name="attachment"/);
   } finally {
     await close(server);
   }
@@ -494,6 +528,118 @@ test('office user submits content for their assigned office as pending review', 
     assert.equal(versionParams[6], 22);
   } finally {
     await close(server);
+  }
+});
+
+test('office user submits Citizen Charter content with a supporting file attachment', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 44, office_id: 7 });
+  const uploadDir = await tempUploadDir();
+  let itemParams;
+  let versionParams;
+  let attachmentParams;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'INSERT INTO content_items')) {
+      itemParams = params;
+      return { rows: [{ id: 900 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO content_versions')) {
+      versionParams = params;
+      return { rows: [{ id: 901 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO attachments')) {
+      attachmentParams = params;
+      return { rows: [{ id: 123 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis, uploadDir });
+  const baseUrl = await listen(server);
+  const multipart = multipartBody([
+    { name: 'office_id', value: '7' },
+    { name: 'content_type', value: 'citizens_charter_service' },
+    { name: 'title', value: 'Certification Request' },
+    { name: 'body', value: 'Updated Citizen Charter steps for certification requests.' },
+    { name: 'requirements', value: 'Office request letter' },
+    {
+      name: 'attachment',
+      filename: '../unsafe/Charter Update.pdf',
+      contentType: 'application/pdf',
+      value: Buffer.from('%PDF-1.4 charter update'),
+    },
+  ]);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        'content-type': multipart.contentType,
+        cookie,
+      },
+      body: multipart.body,
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/content/new?submitted=1');
+    assert.deepEqual(itemParams, [7, 'citizens_charter_service', 44]);
+    assert.equal(versionParams[0], 900);
+    assert.equal(versionParams[2], 'pending_review');
+    assert.equal(versionParams[3], 'Certification Request');
+    assert.equal(attachmentParams[0], 'content_version');
+    assert.equal(attachmentParams[1], 901);
+    assert.equal(attachmentParams[2], 'Charter Update.pdf');
+    assert.equal(attachmentParams[3], 'application/pdf');
+    assert.equal(attachmentParams[4], Buffer.byteLength('%PDF-1.4 charter update'));
+    assert.equal(attachmentParams[6], 44);
+    assert.equal(path.dirname(path.resolve(attachmentParams[5])), path.resolve(uploadDir));
+    assert.match(path.basename(attachmentParams[5]), /^[0-9a-f-]+-charter-update\.pdf$/);
+    assert.equal(await fs.readFile(attachmentParams[5], 'utf8'), '%PDF-1.4 charter update');
+  } finally {
+    await close(server);
+    await fs.rm(uploadDir, { recursive: true, force: true });
+  }
+});
+
+test('office user content upload rejects unsupported supporting file types', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { office_id: 7 });
+  const uploadDir = await tempUploadDir();
+  const pool = createFakePool(() => {
+    throw new Error('invalid upload should not query the database');
+  });
+  const server = createAdminServer({ pool, redis, uploadDir });
+  const baseUrl = await listen(server);
+  const multipart = multipartBody([
+    { name: 'office_id', value: '7' },
+    { name: 'content_type', value: 'citizens_charter_service' },
+    { name: 'title', value: 'Certification Request' },
+    { name: 'body', value: 'Updated Citizen Charter steps.' },
+    {
+      name: 'attachment',
+      filename: 'script.js',
+      contentType: 'application/javascript',
+      value: Buffer.from('alert(1)'),
+    },
+  ]);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        'content-type': multipart.contentType,
+        cookie,
+      },
+      body: multipart.body,
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /Unsupported file type/);
+  } finally {
+    await close(server);
+    await fs.rm(uploadDir, { recursive: true, force: true });
   }
 });
 

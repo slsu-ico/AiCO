@@ -71,6 +71,7 @@ function createRequestHandler(options = {}) {
   const handleAdminRoutes = createAdminRouteHandler({
     pool: options.pool,
     redis: options.redis,
+    uploadDir: options.uploadDir,
     sessionSecret: options.sessionSecret,
     secureCookies: options.secureCookies,
   });
@@ -169,6 +170,7 @@ function startServer() {
     pageAccessToken: config.pageAccessToken,
     pool,
     redis,
+    uploadDir: config.uploadDir,
     sessionSecret: config.sessionSecret,
   });
 

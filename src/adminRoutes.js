@@ -13,6 +13,7 @@ const {
   notFound,
   parseUrlEncoded,
   readBody,
+  readBodyBuffer,
   redirect,
   sendHtml,
 } = require('./httpUtils');
@@ -20,6 +21,7 @@ const { pageLayout } = require('./layout');
 const {
   isAllowedFileType,
   isSafeStoragePath,
+  saveUploadedFile,
   sanitizeOriginalFilename,
 } = require('./uploads');
 
@@ -290,7 +292,7 @@ function renderNewContentForm({ user, notice = '' }) {
     user,
     notice,
     body: `
-      <form method="post" action="/admin/content">
+      <form method="post" action="/admin/content" enctype="multipart/form-data">
         <input name="office_id" type="hidden" value="${escapeHtml(user.office_id)}">
         <label>Content type
           <select id="content_type" name="content_type" required>
@@ -303,6 +305,9 @@ function renderNewContentForm({ user, notice = '' }) {
         ${field('Procedure', 'procedure', { multiline: true })}
         ${field('Fees', 'fees')}
         ${field('Processing time', 'processing_time')}
+        <label>Supporting file
+          <input id="attachment" name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+        </label>
         <button type="submit">Submit for review</button>
       </form>
     `,
@@ -374,6 +379,90 @@ function renderContentReviewDetail(review, user) {
 
 async function readForm(request) {
   return parseUrlEncoded(await readBody(request));
+}
+
+function parseContentDisposition(value) {
+  const params = {};
+  for (const segment of String(value || '').split(';').slice(1)) {
+    const index = segment.indexOf('=');
+    if (index === -1) continue;
+
+    const key = segment.slice(0, index).trim().toLowerCase();
+    let paramValue = segment.slice(index + 1).trim();
+    if (paramValue.startsWith('"') && paramValue.endsWith('"')) {
+      paramValue = paramValue.slice(1, -1);
+    }
+    params[key] = paramValue;
+  }
+  return params;
+}
+
+function getMultipartBoundary(contentType) {
+  const match = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  return match ? (match[1] || match[2]).trim() : '';
+}
+
+async function readMultipartForm(request) {
+  const contentType = String(request.headers['content-type'] || '');
+  const boundary = getMultipartBoundary(contentType);
+  if (!boundary) {
+    const error = new Error('Multipart form boundary is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const raw = (await readBodyBuffer(request)).toString('latin1');
+  const parts = raw.split(`--${boundary}`);
+  const fields = {};
+  const files = {};
+
+  for (const rawPart of parts) {
+    if (!rawPart || rawPart === '--\r\n' || rawPart === '--') continue;
+
+    const part = rawPart.replace(/^\r\n/, '').replace(/\r\n--$/, '').replace(/\r\n$/, '');
+    const separator = part.indexOf('\r\n\r\n');
+    if (separator === -1) continue;
+
+    const rawHeaders = part.slice(0, separator);
+    const rawBody = part.slice(separator + 4);
+    const headers = {};
+    for (const line of rawHeaders.split('\r\n')) {
+      const index = line.indexOf(':');
+      if (index === -1) continue;
+      headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+    }
+
+    const disposition = parseContentDisposition(headers['content-disposition']);
+    const name = disposition.name;
+    if (!name) continue;
+
+    const body = Buffer.from(rawBody, 'latin1');
+    if (Object.hasOwn(disposition, 'filename')) {
+      if (!disposition.filename) continue;
+      files[name] = {
+        originalFilename: disposition.filename,
+        contentType: headers['content-type'] || 'application/octet-stream',
+        buffer: body,
+      };
+    } else {
+      fields[name] = body.toString('utf8');
+    }
+  }
+
+  return { fields, files };
+}
+
+async function readContentForm(request) {
+  const contentType = String(request.headers['content-type'] || '').toLowerCase();
+  if (!contentType.startsWith('multipart/form-data')) {
+    return { fields: await readForm(request), attachment: null };
+  }
+
+  const multipart = await readMultipartForm(request);
+  return {
+    fields: multipart.fields,
+    attachment: multipart.files.attachment || null,
+  };
 }
 
 async function readMetadata(request) {
@@ -626,8 +715,17 @@ function buildContentPayload({ form, user, contentType, title, body }) {
   return payload;
 }
 
-async function handleContentSubmit({ request, response, pool, user }) {
-  const form = await readForm(request);
+async function handleContentSubmit({ request, response, pool, user, uploadDir }) {
+  let submitted;
+  try {
+    submitted = await readContentForm(request);
+  } catch (error) {
+    renderBadRequest(response, error.message || 'A valid content form is required.', user);
+    return;
+  }
+
+  const form = submitted.fields;
+  const attachment = submitted.attachment;
   const officeId = Number(user.office_id);
   const requestedOfficeId = clean(form.office_id);
   const contentType = clean(form.content_type);
@@ -654,6 +752,11 @@ async function handleContentSubmit({ request, response, pool, user }) {
     return;
   }
 
+  if (attachment && !isAllowedFileType(attachment.contentType)) {
+    renderBadRequest(response, 'Unsupported file type.', user);
+    return;
+  }
+
   const payload = buildContentPayload({ form, user, contentType, title, body });
 
   await withTransaction(pool, async (client) => {
@@ -667,7 +770,7 @@ async function handleContentSubmit({ request, response, pool, user }) {
     );
     const contentItem = itemResult.rows[0];
 
-    await client.query(
+    const versionResult = await client.query(
       `
         INSERT INTO content_versions (
           content_item_id,
@@ -692,6 +795,46 @@ async function handleContentSubmit({ request, response, pool, user }) {
         user.id,
       ],
     );
+
+    if (attachment) {
+      let stored;
+      try {
+        stored = await saveUploadedFile({
+          uploadDir,
+          originalFilename: attachment.originalFilename,
+          contentType: attachment.contentType,
+          buffer: attachment.buffer,
+        });
+      } catch (error) {
+        error.statusCode = error.statusCode || 400;
+        throw error;
+      }
+
+      await client.query(
+        `
+          INSERT INTO attachments (
+            linked_type,
+            linked_id,
+            original_filename,
+            file_type,
+            file_size,
+            storage_path,
+            uploaded_by
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id
+        `,
+        [
+          'content_version',
+          versionResult.rows[0].id,
+          stored.originalFilename,
+          stored.fileType,
+          stored.fileSize,
+          stored.storagePath,
+          user.id,
+        ],
+      );
+    }
   });
 
   redirect(response, '/admin/content/new?submitted=1');
@@ -1109,6 +1252,7 @@ function createAdminRouteHandler(options = {}) {
   const services = {
     pool: options.pool,
     redis: options.redis,
+    uploadDir: options.uploadDir || 'uploads',
   };
   const secureCookies = options.secureCookies;
   void options.sessionSecret;
@@ -1225,6 +1369,7 @@ function createAdminRouteHandler(options = {}) {
         response,
         pool: services.pool,
         user,
+        uploadDir: services.uploadDir,
       });
       return true;
     }

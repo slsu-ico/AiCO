@@ -31,6 +31,15 @@ function readBody(request) {
   });
 }
 
+function readBodyBuffer(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
 function sendHtml(response, statusCode, html) {
   response.writeHead(statusCode, {
     'content-type': 'text/html; charset=utf-8',
@@ -61,6 +70,7 @@ module.exports = {
   escapeHtml,
   parseUrlEncoded,
   readBody,
+  readBodyBuffer,
   sendHtml,
   redirect,
   notFound,
