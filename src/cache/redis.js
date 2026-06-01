@@ -21,7 +21,12 @@ function createRedisClient(config = {}) {
     };
   }
 
-  return createClient({ url });
+  return createClient({
+    url,
+    socket: {
+      connectTimeout: 5000,
+    },
+  });
 }
 
 async function setJson(redis, key, value, options = {}) {

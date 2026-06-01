@@ -38,8 +38,8 @@ Set these values in your shell, process manager, or deployment environment befor
 - `PORT`: HTTP port, default `3000`.
 - `MESSENGER_VERIFY_TOKEN`: webhook verify token configured in Meta.
 - `PAGE_ACCESS_TOKEN`: Facebook Page access token for replies.
-- `DATABASE_URL`: PostgreSQL connection string.
-- `REDIS_URL`: Redis connection string.
+- `DATABASE_URL`: PostgreSQL connection string. In production, this must point to a cloud database such as Supabase, Neon, RDS, or another hosted Postgres instance.
+- `REDIS_URL`: Redis connection string. In production, use a managed Redis provider such as Upstash, Redis Enterprise, Amazon MemoryDB, or another external Redis service.
 - `UPLOAD_DIR`: local upload storage path, default `uploads`.
 - `SESSION_SECRET`: long random secret for admin sessions.
 - `BOOTSTRAP_ADMIN_EMAIL`: email for the initial admin user.
@@ -91,6 +91,10 @@ Set `BOOTSTRAP_ADMIN_PASSWORD` to a strong temporary value before running `npm r
 ## Chatbot Published Content
 
 The chatbot reads only active, published records from PostgreSQL through `src/publishedContentRepository.js`. Published services and FAQs are cached in Redis under `published:services` and `published:faqs` for 10 minutes. Admin approval invalidates those Redis keys so the next chatbot request can load the newly published content. Pending review, rejected, and needs revision records never affect live chatbot answers.
+
+### Live cloud updates
+
+To update live chatbot content in the cloud, publish content through the admin portal on the deployed app or edit the production Postgres tables directly. After publication, the bot reloads fresh content from the database once the cache expires or when admin invalidation triggers a refresh.
 
 ## Important Paths
 

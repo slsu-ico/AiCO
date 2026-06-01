@@ -38,6 +38,22 @@ function getConfig(env = process.env) {
   };
 }
 
+function validateConfig(config) {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const missing = [];
+  if (!config.databaseUrl) missing.push('DATABASE_URL');
+  if (!config.redisUrl) missing.push('REDIS_URL');
+  if (!config.pageAccessToken) missing.push('PAGE_ACCESS_TOKEN');
+  if (!config.verifyToken || config.verifyToken === 'dev-verify-token') missing.push('MESSENGER_VERIFY_TOKEN');
+  if (!config.sessionSecret || config.sessionSecret === 'dev-session-secret-change-me') missing.push('SESSION_SECRET');
+
+  if (missing.length) {
+    throw new Error(`Missing required environment variables for production: ${missing.join(', ')}`);
+  }
+}
+
 module.exports = {
   getConfig,
+  validateConfig,
 };

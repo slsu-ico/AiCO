@@ -1,9 +1,10 @@
-const { getConfig } = require('../src/config');
+const { getConfig, validateConfig } = require('../src/config');
 const { createPool } = require('../src/db/postgres');
 const { createRedisClient } = require('../src/cache/redis');
 const { createRequestHandler } = require('../src/server');
 
 const config = getConfig();
+validateConfig(config);
 const pool = createPool({ databaseUrl: config.databaseUrl });
 const redis = createRedisClient({ redisUrl: config.redisUrl });
 

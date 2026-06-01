@@ -115,6 +115,8 @@ This repo can be deployed on Vercel as a single serverless function with Supabas
 - Vercel does not provide persistent local disk storage for uploaded files. The app currently uses local file metadata for attachments only, so persistent file uploads require an external storage provider or app changes.
 - Chatbot sessions are persisted in Redis when `REDIS_URL` is configured, which is essential for correct behavior on serverless platforms.
 - Supabase provides Postgres, but not Redis. A separate Redis service is required for cache and admin sessions.
+- In production, `DATABASE_URL` and `REDIS_URL` must point to real cloud services. Local URLs such as `localhost` will cause the deployment to hang or timeout.
+- The deployed app now validates required production environment variables and fails fast if any required cloud settings are missing.
 
 ### Vercel setup
 
@@ -132,6 +134,8 @@ If you have the production environment values available in your shell, run:
 cd .\scripts
 .\setup-vercel-env.ps1
 ```
+
+If you want to set the environment variables and deploy in one step, use the helper script created in `scripts/deploy-prod.ps1` after you have the required environment values set in your shell.
 
 This script adds the following production variables to the linked Vercel project under `slsu-icos-projects`:
 
