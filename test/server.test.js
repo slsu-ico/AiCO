@@ -22,26 +22,30 @@ test('verifies Messenger webhook with the correct token', async () => {
   const server = createServer({ verifyToken: 'secret', sendMessage: async () => {} });
   const baseUrl = await listen(server);
 
-  const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=secret&hub.challenge=abc123`);
-  const body = await response.text();
+  try {
+    const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=secret&hub.challenge=abc123`);
+    const body = await response.text();
 
-  assert.equal(response.status, 200);
-  assert.equal(body, 'abc123');
-
-  await close(server);
+    assert.equal(response.status, 200);
+    assert.equal(body, 'abc123');
+  } finally {
+    await close(server);
+  }
 });
 
 test('rejects Messenger webhook verification with the wrong token', async () => {
   const server = createServer({ verifyToken: 'secret', sendMessage: async () => {} });
   const baseUrl = await listen(server);
 
-  const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=abc123`);
-  const body = await response.text();
+  try {
+    const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=abc123`);
+    const body = await response.text();
 
-  assert.equal(response.status, 403);
-  assert.equal(body, 'Forbidden');
-
-  await close(server);
+    assert.equal(response.status, 403);
+    assert.equal(body, 'Forbidden');
+  } finally {
+    await close(server);
+  }
 });
 
 test('handles Messenger POST events and sends replies', async () => {
@@ -54,31 +58,34 @@ test('handles Messenger POST events and sends replies', async () => {
   });
   const baseUrl = await listen(server);
 
-  const response = await fetch(`${baseUrl}/webhook`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      object: 'page',
-      entry: [
-        {
-          messaging: [
-            {
-              sender: { id: 'user-1' },
-              message: { text: 'hello' },
-            },
-          ],
-        },
-      ],
-    }),
-  });
+  try {
+    const response = await fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        object: 'page',
+        entry: [
+          {
+            messaging: [
+              {
+                sender: { id: 'user-1' },
+                message: { text: 'hello' },
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-  assert.equal(response.status, 200);
-  assert.equal(await response.text(), 'EVENT_RECEIVED');
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].recipientId, 'user-1');
-  assert.match(sent[0].reply.text, /SLSU internal unit\/office/i);
-
-  await close(server);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'EVENT_RECEIVED');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].recipientId, 'user-1');
+    assert.match(sent[0].reply.text, /Here are the ICO services/i);
+    assert.match(sent[0].reply.text, /Please choose a service/i);
+  } finally {
+    await close(server);
+  }
 });
 
 test('handles Messenger POST events with injected services', async () => {
@@ -106,30 +113,32 @@ test('handles Messenger POST events with injected services', async () => {
   });
   const baseUrl = await listen(server);
 
-  const response = await fetch(`${baseUrl}/webhook`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      object: 'page',
-      entry: [
-        {
-          messaging: [
-            {
-              sender: { id: 'user-1' },
-              message: { text: 'internal' },
-            },
-          ],
-        },
-      ],
-    }),
-  });
+  try {
+    const response = await fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        object: 'page',
+        entry: [
+          {
+            messaging: [
+              {
+                sender: { id: 'user-1' },
+                message: { text: 'internal' },
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-  assert.equal(response.status, 200);
-  assert.equal(await response.text(), 'EVENT_RECEIVED');
-  assert.equal(sent.length, 1);
-  assert.match(sent[0].reply.text, /Custom Published Service/);
-
-  await close(server);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'EVENT_RECEIVED');
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].reply.text, /Custom Published Service/);
+  } finally {
+    await close(server);
+  }
 });
 
 test('loads published services for each Messenger event so Redis invalidation can refresh data', async () => {
@@ -228,9 +237,11 @@ test('returns 404 for unknown paths', async () => {
   const server = createServer({ verifyToken: 'secret', sendMessage: async () => {} });
   const baseUrl = await listen(server);
 
-  const response = await fetch(`${baseUrl}/missing`);
+  try {
+    const response = await fetch(`${baseUrl}/missing`);
 
-  assert.equal(response.status, 404);
-
-  await close(server);
+    assert.equal(response.status, 404);
+  } finally {
+    await close(server);
+  }
 });

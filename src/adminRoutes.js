@@ -113,7 +113,7 @@ function formatStatus(status) {
   return clean(status).replace(/_/g, ' ');
 }
 
-function renderAdminDashboard(user, counts) {
+function renderAdminDashboard(user, counts, options = {}) {
   const safeCounts = {
     pendingAccountRequests: Number(counts.pending_account_requests || 0),
     pendingContentReviews: Number(counts.pending_content_reviews || 0),
@@ -124,6 +124,7 @@ function renderAdminDashboard(user, counts) {
     title: 'Admin dashboard',
     activePath: '/admin',
     user,
+    notice: options.notice,
     body: `
       <table aria-label="Administrative counts">
         <thead>
@@ -147,7 +148,11 @@ function renderAdminDashboard(user, counts) {
           <tr>
             <td>Published records</td>
             <td><strong>${escapeHtml(safeCounts.publishedRecords)}</strong></td>
-            <td>Available to the chatbot</td>
+            <td>
+              <form method="post" action="/admin/cache/refresh">
+                <button type="submit">Refresh cache</button>
+              </form>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -610,7 +615,7 @@ async function requireOfficeUser(context) {
   return user;
 }
 
-async function handleDashboard({ response, pool, user }) {
+async function handleDashboard({ response, pool, user, notice = '' }) {
   if (user.role === 'admin') {
     const result = await pool.query(
       `
@@ -633,7 +638,7 @@ async function handleDashboard({ response, pool, user }) {
       `,
     );
 
-    sendHtml(response, 200, renderAdminDashboard(user, result.rows[0] || {}));
+    sendHtml(response, 200, renderAdminDashboard(user, result.rows[0] || {}, { notice }));
     return;
   }
 
@@ -1046,6 +1051,11 @@ async function invalidatePublishedCache(redis) {
   await redis.del('published:faqs');
 }
 
+async function handleCacheRefresh({ response, redis }) {
+  await invalidatePublishedCache(redis);
+  redirect(response, '/admin?cache_refreshed=1');
+}
+
 async function handleContentApprove({ response, pool, redis, user, id }) {
   await withTransaction(pool, async (client) => {
     const version = await lockContentVersion(client, id);
@@ -1322,7 +1332,26 @@ function createAdminRouteHandler(options = {}) {
       const user = await requireAdmin({ request, response, redis: services.redis });
       if (!user) return true;
 
-      await handleDashboard({ response, pool: services.pool, user });
+      const notice = url.searchParams.get('cache_refreshed') === '1'
+        ? 'Published chatbot cache refreshed.'
+        : '';
+      await handleDashboard({ response, pool: services.pool, user, notice });
+      return true;
+    }
+
+    if (pathname === '/admin/cache/refresh') {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'POST') {
+        methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      await handleCacheRefresh({
+        response,
+        redis: services.redis,
+      });
       return true;
     }
 

@@ -103,6 +103,7 @@ test('pageLayout shows admin navigation', () => {
   assert.match(html, /href="\/admin\/account-requests"/);
   assert.match(html, /href="\/admin\/reviews"/);
   assert.doesNotMatch(html, /href="\/admin\/content\/new"/);
+  assert.doesNotMatch(html, /href="\/admin\/submissions"/);
 });
 
 test('pageLayout shows office user navigation', () => {
@@ -115,7 +116,19 @@ test('pageLayout shows office user navigation', () => {
 
   assert.match(html, /href="\/admin"/);
   assert.match(html, /href="\/admin\/content\/new"/);
+  assert.match(html, /href="\/admin\/submissions"/);
   assert.doesNotMatch(html, /href="\/admin\/account-requests"/);
+  assert.doesNotMatch(html, /href="\/admin\/reviews"/);
+});
+
+test('pageLayout keeps anonymous users out of role-only navigation', () => {
+  const html = pageLayout({ title: 'Login', activePath: '/login', body: '<form></form>' });
+
+  assert.doesNotMatch(html, /href="\/admin"/);
+  assert.doesNotMatch(html, /href="\/admin\/account-requests"/);
+  assert.doesNotMatch(html, /href="\/admin\/reviews"/);
+  assert.doesNotMatch(html, /href="\/admin\/content\/new"/);
+  assert.doesNotMatch(html, /href="\/admin\/submissions"/);
 });
 
 test('pageLayout marks active nav and escapes title and notice while allowing trusted body html', () => {

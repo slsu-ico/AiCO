@@ -297,6 +297,124 @@ test('admin dashboard shows pending account, pending review, and published count
     assert.match(html, /<strong>7<\/strong>/);
     assert.match(html, /Published records/);
     assert.match(html, /<strong>19<\/strong>/);
+    assert.match(html, /action="\/admin\/cache\/refresh"/);
+    assert.match(html, /Refresh cache/);
+    assert.match(html, /href="\/admin\/account-requests"/);
+    assert.match(html, /href="\/admin\/reviews"/);
+    assert.doesNotMatch(html, /My submissions/);
+    assert.doesNotMatch(html, /Submit new content/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin can refresh published caches from the dashboard action', async () => {
+  const redis = new FakeRedis();
+  await redis.set('published:services', 'cached services');
+  await redis.set('published:faqs', 'cached faqs');
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('cache refresh should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/cache/refresh`, {
+      method: 'POST',
+      headers: { cookie },
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin?cache_refreshed=1');
+    assert.equal(await redis.get('published:services'), null);
+    assert.equal(await redis.get('published:faqs'), null);
+    assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin dashboard confirms when published caches were refreshed', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'pending_account_requests')
+      && sqlIncludes(text, 'pending_content_reviews')
+      && sqlIncludes(text, 'published_records')) {
+      return {
+        rows: [{
+          pending_account_requests: '0',
+          pending_content_reviews: '0',
+          published_records: '2',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin?cache_refreshed=1`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Published chatbot cache refreshed/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user cannot refresh published caches', async () => {
+  const redis = new FakeRedis();
+  await redis.set('published:services', 'cached services');
+  await redis.set('published:faqs', 'cached faqs');
+  const cookie = await officeCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('unauthorized cache refresh should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/cache/refresh`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /do not have access/);
+    assert.equal(await redis.get('published:services'), 'cached services');
+    assert.equal(await redis.get('published:faqs'), 'cached faqs');
+    assert.deepEqual(redis.delCalls, []);
+  } finally {
+    await close(server);
+  }
+});
+
+test('cache refresh action requires POST', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('GET cache refresh should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/cache/refresh`, {
+      headers: { cookie },
+    });
+
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get('allow'), 'POST');
+    assert.equal(await response.text(), 'Method Not Allowed');
+    assert.deepEqual(redis.delCalls, []);
   } finally {
     await close(server);
   }
@@ -338,6 +456,11 @@ test('office dashboard shows submissions with status and latest admin note', asy
     assert.match(html, /FAQ/);
     assert.match(html, /needs revision/);
     assert.match(html, /Please add the eligibility period\./);
+    assert.match(html, /href="\/admin\/content\/new"/);
+    assert.doesNotMatch(html, /Pending account requests/);
+    assert.doesNotMatch(html, /Pending content reviews/);
+    assert.doesNotMatch(html, /href="\/admin\/account-requests"/);
+    assert.doesNotMatch(html, /href="\/admin\/reviews"/);
   } finally {
     await close(server);
   }
@@ -470,6 +593,29 @@ test('renders new content form only for authenticated office users', async () =>
     assert.match(html, /citizens_charter_service/);
     assert.match(html, /enctype="multipart\/form-data"/);
     assert.match(html, /name="attachment"/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin cannot access office-only new content form', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('admin should not query the office-only new content form');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content/new`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /do not have access/);
+    assert.doesNotMatch(html, /name="content_type"/);
   } finally {
     await close(server);
   }
@@ -853,6 +999,29 @@ test('office user cannot access admin content review routes', async () => {
 
     assert.equal(response.status, 403);
     assert.match(html, /do not have access/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office user cannot access admin account request routes', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('office users should not query admin account requests');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/account-requests`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 403);
+    assert.match(html, /do not have access/);
+    assert.doesNotMatch(html, /Review requests/);
   } finally {
     await close(server);
   }
