@@ -10,6 +10,7 @@ Redesign AiCO Admin as a polished internal operations console whose UI and workf
 - Keep live chatbot content protected: pending, rejected, draft, and revision content must never look published.
 - Make review status visible everywhere a content item or account request appears.
 - Use a restrained SLSU/ICO visual system: green and gold accents, white work surfaces, crisp borders, readable density, and accessible contrast.
+- Prefer refined institutional depth over flat color: the sidebar uses deep forest green with a subtle diagonal texture.
 - Prefer scan-friendly tables, queues, timelines, and action panels over large marketing-style cards.
 - Make mobile layouts usable for review and forms, with actions staying clear and reachable.
 
@@ -78,13 +79,17 @@ Screens:
 UX requirements:
 
 - Dashboard surfaces queue counters, workload, published content health, and recent activity.
+- Dashboard stat cards are clickable and link directly to the relevant queue.
 - Account request rows separate applicant context from decision controls.
+- Account request rows include applicant initials avatars alongside names for faster scanning.
 - Account request review includes applicant identity, requested office, position, reason, remarks, attachment list, office assignment, role selection, temporary password, and approve/reject/needs-info actions.
 - Rejection and needs-info actions require admin notes.
 - Content review queue is filterable by content type, office, submitted date, and status.
 - Content review detail is a reviewer workspace with submitted content, structured payload, attachments, submitter and office context, current published version, review notes, and decision panel.
+- Content review decisions appear side-by-side as Approve, Request revision, and Reject panels on wider screens.
 - Approval clearly states that the reviewed version will become chatbot-visible published content.
 - Request-revision and reject actions require notes and keep live content unchanged.
+- Admin topbar includes a Refresh cache action that manually purges the published-content Redis cache when route support is implemented.
 - User management supports creating users, assigning offices, setting roles, and activating/deactivating accounts.
 - Office management supports creating and updating office name, abbreviation, contact email, contact number, and active status.
 - Audit views show reviewer, action, note, and timestamp for content and account decisions.
@@ -141,15 +146,19 @@ Only implemented routes should link immediately. Planned areas may be introduced
 The app shell uses:
 
 - Left sidebar with role-specific grouped navigation.
+- Navigation groups use labels such as Overview, Manage, and Settings/System to add hierarchy and scannability.
+- Navigation items support live badge counts, such as pending account requests and pending content reviews for admins.
 - Compact brand block for Southern Luzon State University and AiCO Admin.
-- User summary with name, role, and office when available.
+- User summary with initials avatar, name, role, and office when available.
 - Topbar with page title, contextual subtitle, primary action, and system status.
+- Admin topbar can expose a Refresh cache button when the current user has permission.
 - Main workspace constrained for readability, with wider review/detail pages when needed.
 - Section headers, queue summaries, filter bars, data tables, action panels, timelines, and form sections.
 
 Visual tokens:
 
-- Primary green: SLSU institutional green.
+- Primary green: deep forest green, `#022519`, for the sidebar and core shell.
+- Sidebar texture: subtle diagonal repeating-gradient overlay on the deep forest background.
 - Accent gold: SLSU gold for active navigation and important highlights.
 - Neutral workspace: cool light gray-green.
 - Surfaces: true white.
@@ -164,10 +173,12 @@ Visual tokens:
 Shared primitives:
 
 - Role-aware navigation groups.
+- Badge-count navigation items.
 - Page header with title, subtitle, and actions.
 - Notice banners.
 - Metric/queue summaries.
 - Status badges.
+- Initials avatars for users and applicants.
 - Filter bars.
 - Responsive data tables.
 - Detail summary lists.
@@ -176,11 +187,15 @@ Shared primitives:
 - Review timelines.
 - Empty states.
 - Attachment lists.
+- Drag-and-drop styled upload zones with accepted file type hints.
 
 Component rules:
 
 - Tables remain the primary pattern for dense queues.
+- People rows use initials avatars where names are available.
 - Cards are used for individual repeated items, summaries, or action panels, not as nested page wrappers.
+- Dashboard summary cards are actionable links when they represent a queue.
+- Status badges include both text and colored dots.
 - Buttons have clear hierarchy: primary, secondary, danger.
 - Destructive actions are visually distinct and require notes where the workflow requires them.
 - Form fields use labels, helper text when needed, and grouped sections rather than a long undifferentiated column.
@@ -190,13 +205,19 @@ Component rules:
 The first implementation pass should improve:
 
 - `src/layout.js`: role-based grouped navigation, stronger shell, shared CSS primitives, topbar/page-header flexibility, badges, tables, forms, notices, and responsive behavior.
+- `src/layout.js`: deep forest green sidebar (`#022519`), subtle diagonal texture, grouped navigation labels, initials-based session avatar, and badge-count support through `pageLayout`.
 - Login and request-account screens.
 - Admin dashboard.
+- Admin dashboard count query should feed pending counts into `pageLayout` so navigation badges render.
 - Office dashboard.
 - Account request queue.
+- Account request rows should show applicant initials avatars beside names.
 - New content form.
+- New content form should replace the plain file input presentation with a drag-and-drop styled upload zone and file type hints while preserving native upload behavior.
 - Content review queue.
 - Content review detail.
+- Content review detail should use a three-column approve/request-revision/reject action layout on desktop and stack safely on mobile.
+- Admin cache refresh should be exposed in the topbar only after a route exists to invalidate Redis keys.
 
 The first pass should not pretend that unfinished database-backed screens are fully functional. User management, office management, drafts, revision resubmission, content inventory, audit views, and richer attachment panels can be designed into the layout system and implemented as later route work.
 
@@ -206,6 +227,7 @@ The redesign should use existing data first:
 
 - User role and office from session.
 - Dashboard counts for admins.
+- Pending account request and pending content review counts for navigation badges.
 - Office submission rows.
 - Account request rows.
 - Content review rows and details.
