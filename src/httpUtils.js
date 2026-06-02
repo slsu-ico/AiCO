@@ -1,3 +1,13 @@
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+].join('; ');
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -42,6 +52,7 @@ function readBodyBuffer(request) {
 
 function sendHtml(response, statusCode, html) {
   response.writeHead(statusCode, {
+    'content-security-policy': CONTENT_SECURITY_POLICY,
     'content-type': 'text/html; charset=utf-8',
   });
   response.end(html);
@@ -67,6 +78,7 @@ function methodNotAllowed(response, allowedMethods) {
 }
 
 module.exports = {
+  CONTENT_SECURITY_POLICY,
   escapeHtml,
   parseUrlEncoded,
   readBody,

@@ -35,6 +35,46 @@ const VALID_CONTENT_TYPES = new Set([
   'activity',
 ]);
 const VALID_ATTACHMENT_LINKED_TYPES = new Set(['content_version', 'account_request']);
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const LOGIN_RATE_LIMIT_TTL_SECONDS = 15 * 60;
+
+const FIELD_LIMITS = {
+  full_name: 160,
+  email: 254,
+  requested_office_name: 160,
+  position: 160,
+  reason: 2000,
+  remarks: 2000,
+  title: 240,
+  body: 10000,
+  requirements: 5000,
+  procedure: 5000,
+  fees: 1000,
+  processing_time: 1000,
+  service_name: 240,
+  admin_note: 2000,
+  note: 2000,
+  password: 256,
+};
+
+const FIELD_LABELS = {
+  full_name: 'Full name',
+  email: 'Email',
+  requested_office_name: 'Office name',
+  position: 'Position',
+  reason: 'Reason',
+  remarks: 'Remarks',
+  title: 'Title',
+  body: 'Body',
+  requirements: 'Requirements',
+  procedure: 'Procedure',
+  fees: 'Fees',
+  processing_time: 'Processing time',
+  service_name: 'Service name',
+  admin_note: 'Admin note',
+  note: 'Review note',
+  password: 'Password',
+};
 
 const CONTENT_TYPE_LABELS = {
   citizens_charter_service: "Citizen's Charter service",
@@ -47,6 +87,26 @@ const CONTENT_TYPE_LABELS = {
 
 function clean(value) {
   return String(value ?? '').trim();
+}
+
+function csrfInput(user) {
+  return user?.csrfToken
+    ? `<input name="_csrf" type="hidden" value="${escapeHtml(user.csrfToken)}">`
+    : '';
+}
+
+function exceedsLimit(value, limit) {
+  return String(value ?? '').length > limit;
+}
+
+function validateFieldLengths(form, fieldNames) {
+  for (const fieldName of fieldNames) {
+    const limit = FIELD_LIMITS[fieldName];
+    if (limit && exceedsLimit(form[fieldName], limit)) {
+      return `${FIELD_LABELS[fieldName] || fieldName} must be ${limit} characters or fewer.`;
+    }
+  }
+  return '';
 }
 
 function requireServices(response, services) {
@@ -68,9 +128,10 @@ function field(label, name, options = {}) {
   const required = options.required ? ' required' : '';
   const type = options.type || 'text';
   const value = options.value ? ` value="${escapeHtml(options.value)}"` : '';
+  const maxlength = options.maxlength ? ` maxlength="${escapeHtml(options.maxlength)}"` : '';
   const body = tag === 'textarea'
-    ? `<textarea id="${escapeHtml(name)}" name="${escapeHtml(name)}"${required}>${escapeHtml(options.value || '')}</textarea>`
-    : `<input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="${escapeHtml(type)}"${value}${required}>`;
+    ? `<textarea id="${escapeHtml(name)}" name="${escapeHtml(name)}"${maxlength}${required}>${escapeHtml(options.value || '')}</textarea>`
+    : `<input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="${escapeHtml(type)}"${value}${maxlength}${required}>`;
 
   return `<label>${escapeHtml(label)}${body}</label>`;
 }
@@ -97,12 +158,12 @@ function renderAccountRequest({ notice = '' } = {}) {
     notice,
     body: `
       <form method="post" action="/request-account">
-        ${field('Full name', 'full_name', { required: true })}
-        ${field('Email', 'email', { type: 'email', required: true })}
-        ${field('Office name', 'requested_office_name', { required: true })}
-        ${field('Position', 'position', { required: true })}
-        ${field('Reason', 'reason', { multiline: true })}
-        ${field('Remarks', 'remarks', { multiline: true })}
+        ${field('Full name', 'full_name', { required: true, maxlength: FIELD_LIMITS.full_name })}
+        ${field('Email', 'email', { type: 'email', required: true, maxlength: FIELD_LIMITS.email })}
+        ${field('Office name', 'requested_office_name', { required: true, maxlength: FIELD_LIMITS.requested_office_name })}
+        ${field('Position', 'position', { required: true, maxlength: FIELD_LIMITS.position })}
+        ${field('Reason', 'reason', { multiline: true, maxlength: FIELD_LIMITS.reason })}
+        ${field('Remarks', 'remarks', { multiline: true, maxlength: FIELD_LIMITS.remarks })}
         <button type="submit">Submit request</button>
       </form>
     `,
@@ -150,6 +211,7 @@ function renderAdminDashboard(user, counts, options = {}) {
             <td><strong>${escapeHtml(safeCounts.publishedRecords)}</strong></td>
             <td>
               <form method="post" action="/admin/cache/refresh">
+                ${csrfInput(user)}
                 <button type="submit">Refresh cache</button>
               </form>
             </td>
@@ -230,7 +292,7 @@ function renderForbidden(response, user, message = 'You do not have access to th
   );
 }
 
-function renderAccountRequestRows(rows) {
+function renderAccountRequestRows(rows, user) {
   if (rows.length === 0) {
     return '<p>No account requests to review.</p>';
   }
@@ -244,20 +306,23 @@ function renderAccountRequestRows(rows) {
       <td>${escapeHtml(request.status)}</td>
       <td>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/approve">
+          ${csrfInput(user)}
           <input name="office_id" type="number" min="1" placeholder="Office ID" required>
           <select name="role">
             <option value="office_user">Office user</option>
             <option value="admin">Admin</option>
           </select>
-          <input name="password" type="password" placeholder="Temporary password" required>
+          <input name="password" type="password" maxlength="${FIELD_LIMITS.password}" placeholder="Temporary password" required>
           <button type="submit">Approve</button>
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/reject">
-          <textarea name="admin_note" placeholder="Admin note" required></textarea>
+          ${csrfInput(user)}
+          <textarea name="admin_note" maxlength="${FIELD_LIMITS.admin_note}" placeholder="Admin note" required></textarea>
           <button class="button-danger" type="submit">Reject</button>
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/needs-info">
-          <textarea name="admin_note" placeholder="Admin note" required></textarea>
+          ${csrfInput(user)}
+          <textarea name="admin_note" maxlength="${FIELD_LIMITS.admin_note}" placeholder="Admin note" required></textarea>
           <button type="submit">Needs info</button>
         </form>
       </td>
@@ -298,18 +363,19 @@ function renderNewContentForm({ user, notice = '' }) {
     notice,
     body: `
       <form method="post" action="/admin/content" enctype="multipart/form-data">
+        ${csrfInput(user)}
         <input name="office_id" type="hidden" value="${escapeHtml(user.office_id)}">
         <label>Content type
           <select id="content_type" name="content_type" required>
             ${contentTypeOptions()}
           </select>
         </label>
-        ${field('Title', 'title', { required: true })}
-        ${field('Body', 'body', { multiline: true, required: true })}
-        ${field('Requirements', 'requirements', { multiline: true })}
-        ${field('Procedure', 'procedure', { multiline: true })}
-        ${field('Fees', 'fees')}
-        ${field('Processing time', 'processing_time')}
+        ${field('Title', 'title', { required: true, maxlength: FIELD_LIMITS.title })}
+        ${field('Body', 'body', { multiline: true, required: true, maxlength: FIELD_LIMITS.body })}
+        ${field('Requirements', 'requirements', { multiline: true, maxlength: FIELD_LIMITS.requirements })}
+        ${field('Procedure', 'procedure', { multiline: true, maxlength: FIELD_LIMITS.procedure })}
+        ${field('Fees', 'fees', { maxlength: FIELD_LIMITS.fees })}
+        ${field('Processing time', 'processing_time', { maxlength: FIELD_LIMITS.processing_time })}
         <label>Supporting file
           <input id="attachment" name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
         </label>
@@ -368,14 +434,17 @@ function renderContentReviewDetail(review, user) {
         <pre>${escapeHtml(payload)}</pre>
       </section>
       <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/approve">
+        ${csrfInput(user)}
         <button type="submit">Approve and publish</button>
       </form>
       <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/needs-revision">
-        <textarea name="note" placeholder="Review note" required></textarea>
+        ${csrfInput(user)}
+        <textarea name="note" maxlength="${FIELD_LIMITS.note}" placeholder="Review note" required></textarea>
         <button type="submit">Needs revision</button>
       </form>
       <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/reject">
-        <textarea name="note" placeholder="Review note" required></textarea>
+        ${csrfInput(user)}
+        <textarea name="note" maxlength="${FIELD_LIMITS.note}" placeholder="Review note" required></textarea>
         <button class="button-danger" type="submit">Reject</button>
       </form>
     `,
@@ -498,10 +567,43 @@ async function currentSession(redis, request) {
   return getSession(redis, request.headers.cookie || '');
 }
 
+function getClientIp(request) {
+  const forwardedFor = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwardedFor || request.socket?.remoteAddress || 'unknown';
+}
+
+function loginRateLimitKey(request) {
+  return `rate:login:${getClientIp(request)}`;
+}
+
+async function getLoginAttemptCount(redis, key) {
+  const value = await redis.get(key);
+  const count = Number(value);
+  return Number.isInteger(count) && count > 0 ? count : 0;
+}
+
+async function incrementLoginAttempts(redis, key) {
+  const nextCount = (await getLoginAttemptCount(redis, key)) + 1;
+  await redis.set(key, String(nextCount), {
+    expiration: { type: 'EX', value: LOGIN_RATE_LIMIT_TTL_SECONDS },
+  });
+  return nextCount;
+}
+
+function renderTooManyLoginAttempts(response) {
+  sendHtml(response, 429, renderLogin({ notice: 'Too many login attempts. Please try again later.' }));
+}
+
 async function handleLoginPost({ request, response, pool, redis, secureCookies }) {
   const form = await readForm(request);
   const email = clean(form.email).toLowerCase();
   const password = String(form.password ?? '');
+  const rateLimitKey = loginRateLimitKey(request);
+
+  if ((await getLoginAttemptCount(redis, rateLimitKey)) >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS) {
+    renderTooManyLoginAttempts(response);
+    return;
+  }
 
   const result = await pool.query(
     `
@@ -516,9 +618,12 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
   const user = result.rows[0];
 
   if (!user || !verifyPassword(password, user.password_hash)) {
+    await incrementLoginAttempts(redis, rateLimitKey);
     sendHtml(response, 401, renderLogin({ notice: 'Invalid email or password.' }));
     return;
   }
+
+  await redis.del(rateLimitKey);
 
   const session = await createSession(redis, {
     id: user.id,
@@ -538,6 +643,19 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
 
 async function handleRequestAccountPost({ request, response, pool }) {
   const form = await readForm(request);
+  const lengthError = validateFieldLengths(form, [
+    'full_name',
+    'email',
+    'requested_office_name',
+    'position',
+    'reason',
+    'remarks',
+  ]);
+  if (lengthError) {
+    sendHtml(response, 400, renderAccountRequest({ notice: lengthError }));
+    return;
+  }
+
   const values = {
     full_name: clean(form.full_name),
     email: clean(form.email).toLowerCase(),
@@ -588,7 +706,22 @@ async function requireAdmin({ request, response, redis }) {
     return null;
   }
 
-  return session.user;
+  return {
+    ...session.user,
+    csrfToken: session.csrfToken,
+  };
+}
+
+async function validateCsrf({ request, response, user, form, csrfProtection }) {
+  if (!csrfProtection || request.method !== 'POST') return true;
+
+  const token = clean(form?._csrf || request.headers['x-csrf-token']);
+  if (token && user?.csrfToken && token === user.csrfToken) {
+    return true;
+  }
+
+  renderForbidden(response, user, 'Invalid CSRF token.');
+  return false;
 }
 
 async function requireReviewAdmin(context) {
@@ -697,7 +830,7 @@ async function handleAccountRequestsIndex({ response, pool, user }) {
       title: 'Account requests',
       activePath: '/admin/account-requests',
       user,
-      body: renderAccountRequestRows(result.rows),
+      body: renderAccountRequestRows(result.rows, user),
     }),
   );
 }
@@ -720,7 +853,7 @@ function buildContentPayload({ form, user, contentType, title, body }) {
   return payload;
 }
 
-async function handleContentSubmit({ request, response, pool, user, uploadDir }) {
+async function handleContentSubmit({ request, response, pool, user, uploadDir, csrfProtection }) {
   let submitted;
   try {
     submitted = await readContentForm(request);
@@ -730,6 +863,22 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir })
   }
 
   const form = submitted.fields;
+  if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
+
+  const lengthError = validateFieldLengths(form, [
+    'title',
+    'body',
+    'requirements',
+    'procedure',
+    'fees',
+    'processing_time',
+    'service_name',
+  ]);
+  if (lengthError) {
+    renderBadRequest(response, lengthError, user);
+    return;
+  }
+
   const attachment = submitted.attachment;
   const officeId = Number(user.office_id);
   const requestedOfficeId = clean(form.office_id);
@@ -1090,8 +1239,16 @@ async function handleContentApprove({ response, pool, redis, user, id }) {
   redirect(response, '/admin/reviews');
 }
 
-async function handleContentReviewStatus({ request, response, pool, user, id, status }) {
+async function handleContentReviewStatus({ request, response, pool, user, id, status, csrfProtection }) {
   const form = await readForm(request);
+  if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
+
+  const lengthError = validateFieldLengths(form, ['note']);
+  if (lengthError) {
+    renderBadRequest(response, lengthError, user);
+    return;
+  }
+
   const note = clean(form.note);
 
   if (!note) {
@@ -1151,8 +1308,16 @@ function parseContentReviewDetail(pathname) {
   return match ? Number(match[1]) : null;
 }
 
-async function handleApprove({ request, response, pool, user, id }) {
+async function handleApprove({ request, response, pool, user, id, csrfProtection }) {
   const form = await readForm(request);
+  if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
+
+  const lengthError = validateFieldLengths(form, ['password', 'admin_note']);
+  if (lengthError) {
+    renderBadRequest(response, lengthError, user);
+    return;
+  }
+
   const officeId = Number(clean(form.office_id));
   const role = clean(form.role);
   const password = String(form.password ?? '');
@@ -1232,8 +1397,16 @@ async function handleApprove({ request, response, pool, user, id }) {
   redirect(response, '/admin/account-requests');
 }
 
-async function handleReviewStatus({ request, response, pool, user, id, status }) {
+async function handleReviewStatus({ request, response, pool, user, id, status, csrfProtection }) {
   const form = await readForm(request);
+  if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
+
+  const lengthError = validateFieldLengths(form, ['admin_note']);
+  if (lengthError) {
+    renderBadRequest(response, lengthError, user);
+    return;
+  }
+
   const adminNote = clean(form.admin_note);
 
   if (!adminNote) {
@@ -1265,6 +1438,7 @@ function createAdminRouteHandler(options = {}) {
     uploadDir: options.uploadDir || 'uploads',
   };
   const secureCookies = options.secureCookies;
+  const csrfProtection = options.csrfProtection !== false;
   void options.sessionSecret;
 
   return async function handleAdminRoutes(request, response, url) {
@@ -1348,6 +1522,10 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
 
+      if (!(await validateCsrf({ request, response, user, form: await readForm(request), csrfProtection }))) {
+        return true;
+      }
+
       await handleCacheRefresh({
         response,
         redis: services.redis,
@@ -1399,6 +1577,7 @@ function createAdminRouteHandler(options = {}) {
         pool: services.pool,
         user,
         uploadDir: services.uploadDir,
+        csrfProtection,
       });
       return true;
     }
@@ -1409,6 +1588,10 @@ function createAdminRouteHandler(options = {}) {
 
       if (request.method !== 'POST') {
         methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      if (!(await validateCsrf({ request, response, user, csrfProtection }))) {
         return true;
       }
 
@@ -1464,6 +1647,10 @@ function createAdminRouteHandler(options = {}) {
       }
 
       if (contentReviewAction.action === 'approve') {
+        if (!(await validateCsrf({ request, response, user, form: await readForm(request), csrfProtection }))) {
+          return true;
+        }
+
         await handleContentApprove({
           response,
           pool: services.pool,
@@ -1481,6 +1668,7 @@ function createAdminRouteHandler(options = {}) {
         user,
         id: contentReviewAction.id,
         status: contentReviewAction.action === 'reject' ? 'rejected' : 'needs_revision',
+        csrfProtection,
       });
       return true;
     }
@@ -1496,7 +1684,14 @@ function createAdminRouteHandler(options = {}) {
       }
 
       if (action.action === 'approve') {
-        await handleApprove({ request, response, pool: services.pool, user, id: action.id });
+        await handleApprove({
+          request,
+          response,
+          pool: services.pool,
+          user,
+          id: action.id,
+          csrfProtection,
+        });
         return true;
       }
 
@@ -1507,6 +1702,7 @@ function createAdminRouteHandler(options = {}) {
         user,
         id: action.id,
         status: action.action === 'reject' ? 'rejected' : 'needs_info',
+        csrfProtection,
       });
       return true;
     }

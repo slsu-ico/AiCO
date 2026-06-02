@@ -78,16 +78,36 @@ function createFakePool(handler) {
   };
 }
 
-function createAdminServer({ pool, redis = new FakeRedis(), uploadDir }) {
+function createAdminServer({
+  pool,
+  redis = new FakeRedis(),
+  uploadDir,
+  csrfProtection = false,
+  sessionSecret = 'test-session-secret',
+}) {
   return createServer({
     pool,
     redis,
     uploadDir,
     services: [],
-    sessionSecret: 'test-session-secret',
+    csrfProtection,
+    sessionSecret,
     verifyToken: 'secret',
     sendMessage: async () => {},
   });
+}
+
+function createHardenedAdminServer(options) {
+  return createAdminServer({
+    ...options,
+    csrfProtection: true,
+    sessionSecret: 'test-session-secret',
+  });
+}
+
+function extractCsrfToken(html) {
+  const match = html.match(/<input[^>]*name="_csrf"[^>]*value="([^"]+)"/);
+  return match ? match[1] : '';
 }
 
 async function tempUploadDir() {
@@ -155,6 +175,185 @@ test('renders the public account request form', async () => {
     assert.match(html, /name="full_name"/);
     assert.match(html, /name="requested_office_name"/);
     assert.match(html, /name="reason"/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('HTML responses include a restrictive Content-Security-Policy header', async () => {
+  const server = createAdminServer({ pool: createFakePool(() => ({ rows: [] })) });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/request-account`);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get('content-security-policy'),
+      "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+    );
+  } finally {
+    await close(server);
+  }
+});
+
+test('hardened forms include CSRF tokens and reject forged admin POSTs', async () => {
+  const redis = new FakeRedis();
+  await redis.set('published:services', 'cached services');
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool((text) => {
+    if (sqlIncludes(text, 'pending_account_requests')
+      && sqlIncludes(text, 'pending_content_reviews')
+      && sqlIncludes(text, 'published_records')) {
+      return {
+        rows: [{
+          pending_account_requests: '0',
+          pending_content_reviews: '0',
+          published_records: '1',
+        }],
+      };
+    }
+    throw new Error('forged cache refresh should not query the database');
+  });
+  const server = createHardenedAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const dashboard = await fetch(`${baseUrl}/admin`, { headers: { cookie } });
+    const html = await dashboard.text();
+    assert.equal(dashboard.status, 200);
+    assert.match(html, /name="_csrf"/);
+
+    const forged = await fetch(`${baseUrl}/admin/cache/refresh`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const forgedText = await forged.text();
+
+    assert.equal(forged.status, 403);
+    assert.match(forgedText, /Invalid CSRF token/);
+    assert.equal(await redis.get('published:services'), 'cached services');
+    assert.deepEqual(redis.delCalls, []);
+
+    const token = extractCsrfToken(html);
+    const legitimate = await fetch(`${baseUrl}/admin/cache/refresh`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: token }),
+      redirect: 'manual',
+    });
+
+    assert.equal(legitimate.status, 303);
+    assert.equal(legitimate.headers.get('location'), '/admin?cache_refreshed=1');
+    assert.equal(await redis.get('published:services'), null);
+  } finally {
+    await close(server);
+  }
+});
+
+test('login attempts are rate limited by client IP', async () => {
+  const redis = new FakeRedis();
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'FROM users') && sqlIncludes(text, 'lower(email) = lower($1)')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createHardenedAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await fetch(`${baseUrl}/login`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-forwarded-for': '203.0.113.44',
+        },
+        body: form({ email: 'admin@slsu.edu.ph', password: 'bad-password' }),
+      });
+      assert.equal(response.status, 401);
+    }
+
+    const limited = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-forwarded-for': '203.0.113.44',
+      },
+      body: form({ email: 'admin@slsu.edu.ph', password: 'bad-password' }),
+    });
+    const html = await limited.text();
+
+    assert.equal(limited.status, 429);
+    assert.match(html, /Too many login attempts/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('account request rejects overlong public text fields before inserting', async () => {
+  const pool = createFakePool(() => {
+    throw new Error('overlong account request should not query the database');
+  });
+  const server = createHardenedAdminServer({ pool });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/request-account`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form({
+        full_name: 'Maria Santos',
+        email: 'maria@slsu.edu.ph',
+        requested_office_name: 'Registrar',
+        position: 'Office Staff',
+        reason: 'x'.repeat(2001),
+        remarks: 'Submitted by unit head',
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /Reason must be 2000 characters or fewer/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office content submission rejects overlong body before inserting', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { office_id: 7 });
+  const pool = createFakePool(() => {
+    throw new Error('overlong content should not query the database');
+  });
+  const server = createHardenedAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const formPage = await fetch(`${baseUrl}/admin/content/new`, { headers: { cookie } });
+    const token = extractCsrfToken(await formPage.text());
+    const response = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        _csrf: token,
+        office_id: '7',
+        content_type: 'faq',
+        title: 'Scholarship FAQ',
+        body: 'x'.repeat(10001),
+      }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /Body must be 10000 characters or fewer/);
   } finally {
     await close(server);
   }

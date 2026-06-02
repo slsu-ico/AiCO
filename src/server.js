@@ -74,6 +74,7 @@ function createRequestHandler(options = {}) {
     uploadDir: options.uploadDir,
     sessionSecret: options.sessionSecret,
     secureCookies: options.secureCookies,
+    csrfProtection: options.csrfProtection,
   });
 
   const sendMessage = options.sendMessage || (async (recipientId, reply) => {

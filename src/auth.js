@@ -82,6 +82,7 @@ async function createSession(redis, user, options = {}) {
   const session = {
     id: sessionId,
     user: sanitizeUser(user),
+    csrfToken: crypto.randomBytes(32).toString('base64url'),
     createdAt: new Date().toISOString(),
   };
   const key = sessionKey(sessionId);
