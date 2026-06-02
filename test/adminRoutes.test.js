@@ -507,6 +507,30 @@ test('admin dashboard shows pending account, pending review, and published count
   }
 });
 
+test('admin database errors render a generic internal error page', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('database stack trace: password_hash from users');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 500);
+    assert.match(html, /Internal Server Error/);
+    assert.doesNotMatch(html, /database stack trace/);
+    assert.doesNotMatch(html, /password_hash/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('admin can refresh published caches from the dashboard action', async () => {
   const redis = new FakeRedis();
   await redis.set('published:services', 'cached services');

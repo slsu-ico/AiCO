@@ -6,6 +6,7 @@ const {
   escapeHtml,
   parseUrlEncoded,
   readBody,
+  readBodyBuffer,
   sendHtml,
   redirect,
   notFound,
@@ -52,6 +53,17 @@ test('parseUrlEncoded parses form bodies and preserves repeated fields', () => {
 
 test('readBody collects request chunks as utf8 text', async () => {
   assert.equal(await readBody(createRequest(['first ', 'second'])), 'first second');
+});
+
+test('readBodyBuffer rejects requests that exceed the configured byte limit', async () => {
+  await assert.rejects(
+    readBodyBuffer(createRequest(['first ', 'second']), { maxBytes: 10 }),
+    (error) => {
+      assert.equal(error.statusCode, 413);
+      assert.match(error.message, /too large/i);
+      return true;
+    },
+  );
 });
 
 test('response helpers write expected status codes and headers', () => {

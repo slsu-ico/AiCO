@@ -229,6 +229,43 @@ test('withTransaction preserves the original error when rollback fails', async (
   assert.deepEqual(calls, ['connect', 'BEGIN', 'ROLLBACK', 'release']);
 });
 
+test('withTransaction preserves rollback context when callbacks throw primitives', async () => {
+  const { withTransaction } = require('../src/db/postgres');
+  const calls = [];
+  const rollbackError = new Error('rollback failed');
+  const client = {
+    async query(text) {
+      calls.push(text);
+      if (text === 'ROLLBACK') {
+        throw rollbackError;
+      }
+    },
+    release() {
+      calls.push('release');
+    },
+  };
+  const pool = {
+    async connect() {
+      calls.push('connect');
+      return client;
+    },
+  };
+
+  await assert.rejects(
+    withTransaction(pool, async () => {
+      throw 'primitive failure';
+    }),
+    (error) => {
+      assert.equal(error.message, 'primitive failure');
+      assert.equal(error.rollbackError, rollbackError);
+      assert.equal(error.originalError, 'primitive failure');
+      return true;
+    },
+  );
+
+  assert.deepEqual(calls, ['connect', 'BEGIN', 'ROLLBACK', 'release']);
+});
+
 test('migrate executes schema.sql inside a transaction', async () => {
   const { migrate } = require('../src/db/migrate');
   const schema = readSchema();

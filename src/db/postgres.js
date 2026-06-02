@@ -11,6 +11,18 @@ function query(pool, text, params) {
   return pool.query(text, params);
 }
 
+function normalizeRollbackFailure(error, rollbackError) {
+  if (error && (typeof error === 'object' || typeof error === 'function')) {
+    error.rollbackError = rollbackError;
+    return error;
+  }
+
+  const wrappedError = new Error(String(error));
+  wrappedError.originalError = error;
+  wrappedError.rollbackError = rollbackError;
+  return wrappedError;
+}
+
 async function withTransaction(pool, callback) {
   const client = await pool.connect();
 
@@ -23,9 +35,7 @@ async function withTransaction(pool, callback) {
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      if (error && (typeof error === 'object' || typeof error === 'function')) {
-        error.rollbackError = rollbackError;
-      }
+      throw normalizeRollbackFailure(error, rollbackError);
     }
     throw error;
   } finally {

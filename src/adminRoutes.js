@@ -21,6 +21,7 @@ const { pageLayout } = require('./layout');
 const {
   isAllowedFileType,
   isSafeStoragePath,
+  DEFAULT_MAX_BYTES,
   saveUploadedFile,
   sanitizeOriginalFilename,
 } = require('./uploads');
@@ -37,6 +38,8 @@ const VALID_CONTENT_TYPES = new Set([
 const VALID_ATTACHMENT_LINKED_TYPES = new Set(['content_version', 'account_request']);
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_TTL_SECONDS = 15 * 60;
+const MULTIPART_FIELD_OVERHEAD_BYTES = 128 * 1024;
+const MAX_MULTIPART_BODY_BYTES = DEFAULT_MAX_BYTES + MULTIPART_FIELD_OVERHEAD_BYTES;
 
 const FIELD_LIMITS = {
   full_name: 160,
@@ -485,7 +488,7 @@ async function readMultipartForm(request) {
     throw error;
   }
 
-  const raw = (await readBodyBuffer(request)).toString('latin1');
+  const raw = (await readBodyBuffer(request, { maxBytes: MAX_MULTIPART_BODY_BYTES })).toString('latin1');
   const parts = raw.split(`--${boundary}`);
   const fields = {};
   const files = {};
@@ -577,16 +580,25 @@ function loginRateLimitKey(request) {
 }
 
 async function getLoginAttemptCount(redis, key) {
-  const value = await redis.get(key);
+  let value;
+  try {
+    value = await redis.get(key);
+  } catch {
+    return 0;
+  }
   const count = Number(value);
   return Number.isInteger(count) && count > 0 ? count : 0;
 }
 
 async function incrementLoginAttempts(redis, key) {
   const nextCount = (await getLoginAttemptCount(redis, key)) + 1;
-  await redis.set(key, String(nextCount), {
-    expiration: { type: 'EX', value: LOGIN_RATE_LIMIT_TTL_SECONDS },
-  });
+  try {
+    await redis.set(key, String(nextCount), {
+      expiration: { type: 'EX', value: LOGIN_RATE_LIMIT_TTL_SECONDS },
+    });
+  } catch {
+    return nextCount;
+  }
   return nextCount;
 }
 
@@ -623,7 +635,11 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
     return;
   }
 
-  await redis.del(rateLimitKey);
+  try {
+    await redis.del(rateLimitKey);
+  } catch {
+    // Login should not fail only because the transient rate-limit key is unavailable.
+  }
 
   const session = await createSession(redis, {
     id: user.id,

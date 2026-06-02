@@ -95,6 +95,19 @@ test('getSession loads a valid session from a cookie header', async () => {
   assert.deepEqual(session.user, { id: 9, email: 'office@slsu.edu.ph' });
 });
 
+test('getSession falls back to the process session shadow when Redis is unavailable', async () => {
+  const redis = new FakeRedis();
+  const created = await createSession(redis, { id: 9, email: 'office@slsu.edu.ph' });
+  redis.get = async () => {
+    throw new Error('Redis connection dropped');
+  };
+
+  const session = await getSession(redis, `${AICO_SESSION_COOKIE}=${created.cookieValue}`);
+
+  assert.equal(session.id, created.sessionId);
+  assert.deepEqual(session.user, { id: 9, email: 'office@slsu.edu.ph' });
+});
+
 test('getSession rejects missing or tampered session cookies', async () => {
   const redis = new FakeRedis();
   await createSession(redis, { id: 2, email: 'admin@slsu.edu.ph' });

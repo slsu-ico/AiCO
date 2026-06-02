@@ -15,6 +15,11 @@ function sendText(response, statusCode, body) {
   response.end(body);
 }
 
+function publicErrorMessage(error, statusCode) {
+  if (statusCode >= 500) return 'Internal Server Error';
+  return error.message || 'Internal Server Error';
+}
+
 function readJson(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -141,7 +146,8 @@ function createRequestHandler(options = {}) {
       sendText(response, 404, 'Not Found');
     } catch (error) {
       if (!response.headersSent) {
-        sendText(response, error.statusCode || 500, error.message || 'Internal Server Error');
+        const statusCode = error.statusCode || 500;
+        sendText(response, statusCode, publicErrorMessage(error, statusCode));
       } else {
         response.end();
       }

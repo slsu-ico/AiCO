@@ -41,12 +41,43 @@ function readBody(request) {
   });
 }
 
-function readBodyBuffer(request) {
+function bodyTooLargeError(maxBytes) {
+  const error = new Error(`Request body is too large. Maximum allowed size is ${maxBytes} bytes.`);
+  error.statusCode = 413;
+  return error;
+}
+
+function readBodyBuffer(request, options = {}) {
+  const maxBytes = Number.isFinite(options.maxBytes) && options.maxBytes > 0
+    ? options.maxBytes
+    : null;
+
   return new Promise((resolve, reject) => {
     const chunks = [];
-    request.on('data', (chunk) => chunks.push(chunk));
+    let totalBytes = 0;
+    let rejected = false;
+
+    const contentLength = Number(request.headers?.['content-length']);
+    if (maxBytes && Number.isFinite(contentLength) && contentLength > maxBytes) {
+      reject(bodyTooLargeError(maxBytes));
+      return;
+    }
+
+    request.on('data', (chunk) => {
+      if (rejected) return;
+      totalBytes += chunk.length;
+      if (maxBytes && totalBytes > maxBytes) {
+        rejected = true;
+        reject(bodyTooLargeError(maxBytes));
+        if (typeof request.destroy === 'function') request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
     request.on('end', () => resolve(Buffer.concat(chunks)));
-    request.on('error', reject);
+    request.on('error', (error) => {
+      if (!rejected) reject(error);
+    });
   });
 }
 
