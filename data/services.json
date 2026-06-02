@@ -175,9 +175,7 @@
     "classification": "Highly Technical",
     "transaction_type": "G2G - Government to Government",
     "who_may_avail": "All University Units",
-    "requirements": [
-      "Completely filled out online Job Order form."
-    ],
+    "requirements": ["Completely filled out online Job Order form."],
     "submission_timeline": [
       "Requests for AVPs must be submitted at least ten (10) working days before the event or presentation date.",
       "Requests involving shooting across multiple locations must be submitted at least twenty (20) working days before the event or presentation date.",

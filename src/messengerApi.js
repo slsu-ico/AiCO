@@ -3,13 +3,16 @@ async function sendMessengerMessage(pageAccessToken, recipientId, reply) {
     throw new Error('PAGE_ACCESS_TOKEN is required to send Messenger replies.');
   }
 
-  const response = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(toMessengerPayload(recipientId, reply)),
     },
-    body: JSON.stringify(toMessengerPayload(recipientId, reply)),
-  });
+  );
 
   if (!response.ok) {
     const body = await response.text();

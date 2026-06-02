@@ -64,16 +64,23 @@ test('loadPublishedServices queries published active service payloads and caches
   assert.deepEqual(services, [servicePayload]);
   assert.equal(pool.calls.length, 1);
   assert.ok(sqlIncludes(pool.calls[0].text, 'FROM content_items ci'));
-  assert.ok(sqlIncludes(pool.calls[0].text, 'JOIN content_versions cv ON cv.id = ci.current_published_version_id'));
+  assert.ok(
+    sqlIncludes(
+      pool.calls[0].text,
+      'JOIN content_versions cv ON cv.id = ci.current_published_version_id',
+    ),
+  );
   assert.ok(sqlIncludes(pool.calls[0].text, 'ci.active = true'));
   assert.ok(sqlIncludes(pool.calls[0].text, 'ci.content_type = $1'));
   assert.ok(sqlIncludes(pool.calls[0].text, "cv.status = 'published'"));
   assert.deepEqual(pool.calls[0].params, ['citizens_charter_service']);
-  assert.deepEqual(redis.setCalls, [{
-    key: 'published:services',
-    value: JSON.stringify([servicePayload]),
-    options: undefined,
-  }]);
+  assert.deepEqual(redis.setCalls, [
+    {
+      key: 'published:services',
+      value: JSON.stringify([servicePayload]),
+      options: undefined,
+    },
+  ]);
 });
 
 test('loadPublishedFaqs queries only published active FAQ payloads and caches them', async () => {
@@ -89,16 +96,23 @@ test('loadPublishedFaqs queries only published active FAQ payloads and caches th
   assert.deepEqual(faqs, [faqPayload]);
   assert.equal(pool.calls.length, 1);
   assert.ok(sqlIncludes(pool.calls[0].text, 'FROM content_items ci'));
-  assert.ok(sqlIncludes(pool.calls[0].text, 'JOIN content_versions cv ON cv.id = ci.current_published_version_id'));
+  assert.ok(
+    sqlIncludes(
+      pool.calls[0].text,
+      'JOIN content_versions cv ON cv.id = ci.current_published_version_id',
+    ),
+  );
   assert.ok(sqlIncludes(pool.calls[0].text, 'ci.active = true'));
   assert.ok(sqlIncludes(pool.calls[0].text, 'ci.content_type = $1'));
   assert.ok(sqlIncludes(pool.calls[0].text, "cv.status = 'published'"));
   assert.deepEqual(pool.calls[0].params, ['faq']);
-  assert.deepEqual(redis.setCalls, [{
-    key: 'published:faqs',
-    value: JSON.stringify([faqPayload]),
-    options: undefined,
-  }]);
+  assert.deepEqual(redis.setCalls, [
+    {
+      key: 'published:faqs',
+      value: JSON.stringify([faqPayload]),
+      options: undefined,
+    },
+  ]);
 });
 
 test('warmPublishedContentCache refreshes service and FAQ caches from PostgreSQL', async () => {
@@ -112,7 +126,9 @@ test('warmPublishedContentCache refreshes service and FAQ caches from PostgreSQL
     calls: [],
     async query(text, params = []) {
       this.calls.push({ text, params });
-      if (params[0] === 'citizens_charter_service') return { rows: [{ structured_payload: servicePayload }] };
+      if (params[0] === 'citizens_charter_service') {
+        return { rows: [{ structured_payload: servicePayload }] };
+      }
       if (params[0] === 'faq') return { rows: [{ structured_payload: faqPayload }] };
       throw new Error(`Unexpected params: ${params}`);
     },
@@ -124,7 +140,10 @@ test('warmPublishedContentCache refreshes service and FAQ caches from PostgreSQL
     services: [servicePayload],
     faqs: [faqPayload],
   });
-  assert.deepEqual(pool.calls.map((call) => call.params), [['citizens_charter_service'], ['faq']]);
+  assert.deepEqual(
+    pool.calls.map((call) => call.params),
+    [['citizens_charter_service'], ['faq']],
+  );
   assert.deepEqual(redis.setCalls, [
     {
       key: 'published:services',

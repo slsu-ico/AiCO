@@ -5,7 +5,8 @@ const { hashPassword, verifyPassword } = require('./passwordHash');
 
 const AICO_SESSION_COOKIE = 'aico_session';
 const DEFAULT_SESSION_TTL_SECONDS = 8 * 60 * 60;
-const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function sessionKey(sessionId) {
   return `session:${sessionId}`;
@@ -62,12 +63,7 @@ function getSessionId(cookieHeader) {
 }
 
 function sanitizeUser(user) {
-  const {
-    password,
-    passwordHash,
-    password_hash: passwordHashColumn,
-    ...safeUser
-  } = user;
+  const { password, passwordHash, password_hash: passwordHashColumn, ...safeUser } = user;
 
   void password;
   void passwordHash;

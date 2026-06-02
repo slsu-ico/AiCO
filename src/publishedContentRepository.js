@@ -11,19 +11,14 @@ function parseStructuredPayload(value) {
   return value;
 }
 
-async function loadPublishedPayloads({
-  pool,
-  redis,
-  cacheKey,
-  contentType,
-  forceRefresh = false,
-}) {
+async function loadPublishedPayloads({ pool, redis, cacheKey, contentType, forceRefresh = false }) {
   if (!forceRefresh) {
     const cached = await getJson(redis, cacheKey);
     if (cached) return cached;
   }
 
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT cv.structured_payload
     FROM content_items ci
     JOIN content_versions cv ON cv.id = ci.current_published_version_id
@@ -31,7 +26,9 @@ async function loadPublishedPayloads({
       AND ci.content_type = $1
       AND cv.status = 'published'
     ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-  `, [contentType]);
+  `,
+    [contentType],
+  );
 
   const payloads = result.rows.map((row) => parseStructuredPayload(row.structured_payload));
   await setJson(redis, cacheKey, payloads);

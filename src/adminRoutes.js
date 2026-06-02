@@ -134,9 +134,10 @@ function field(label, name, options = {}) {
   const type = options.type || 'text';
   const value = options.value ? ` value="${escapeHtml(options.value)}"` : '';
   const maxlength = options.maxlength ? ` maxlength="${escapeHtml(options.maxlength)}"` : '';
-  const body = tag === 'textarea'
-    ? `<textarea id="${escapeHtml(name)}" name="${escapeHtml(name)}"${maxlength}${required}>${escapeHtml(options.value || '')}</textarea>`
-    : `<input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="${escapeHtml(type)}"${value}${maxlength}${required}>`;
+  const body =
+    tag === 'textarea'
+      ? `<textarea id="${escapeHtml(name)}" name="${escapeHtml(name)}"${maxlength}${required}>${escapeHtml(options.value || '')}</textarea>`
+      : `<input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="${escapeHtml(type)}"${value}${maxlength}${required}>`;
 
   return `<label>${escapeHtml(label)}${body}</label>`;
 }
@@ -213,8 +214,9 @@ function option(value, label, selected) {
 }
 
 function renderFilterBar({ action, state, statusOptions = [], typeOptions = [] }) {
-  const statusSelect = statusOptions.length > 0
-    ? `
+  const statusSelect =
+    statusOptions.length > 0
+      ? `
       <label>Status
         <select name="status">
           ${option('', 'All statuses', state.status)}
@@ -222,9 +224,10 @@ function renderFilterBar({ action, state, statusOptions = [], typeOptions = [] }
         </select>
       </label>
     `
-    : '';
-  const typeSelect = typeOptions.length > 0
-    ? `
+      : '';
+  const typeSelect =
+    typeOptions.length > 0
+      ? `
       <label>Type
         <select name="type">
           ${option('', 'All types', state.type)}
@@ -232,7 +235,7 @@ function renderFilterBar({ action, state, statusOptions = [], typeOptions = [] }
         </select>
       </label>
     `
-    : '';
+      : '';
 
   return `
     <form class="table-controls" method="get" action="${escapeHtml(action)}">
@@ -261,12 +264,14 @@ function pageHref(basePath, state, page) {
 function renderPagination({ state, total, pageSize = LIST_PAGE_SIZE }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(state.page, pageCount);
-  const previous = page > 1
-    ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page - 1))}">Previous</a>`
-    : '<span class="button button-disabled" aria-disabled="true">Previous</span>';
-  const next = page < pageCount
-    ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page + 1))}">Next</a>`
-    : '<span class="button button-disabled" aria-disabled="true">Next</span>';
+  const previous =
+    page > 1
+      ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page - 1))}">Previous</a>`
+      : '<span class="button button-disabled" aria-disabled="true">Previous</span>';
+  const next =
+    page < pageCount
+      ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page + 1))}">Next</a>`
+      : '<span class="button button-disabled" aria-disabled="true">Next</span>';
 
   return `
     <nav class="pagination" aria-label="Pagination">
@@ -330,7 +335,9 @@ function renderOfficeSubmissionRows(rows) {
     return '<p>No submissions yet.</p>';
   }
 
-  const body = rows.map((submission) => `
+  const body = rows
+    .map(
+      (submission) => `
     <tr>
       <td>${escapeHtml(submission.title)}</td>
       <td>${escapeHtml(CONTENT_TYPE_LABELS[submission.content_type] || submission.content_type)}</td>
@@ -338,7 +345,9 @@ function renderOfficeSubmissionRows(rows) {
       <td>${escapeHtml(submission.submitted_at || '')}</td>
       <td>${escapeHtml(submission.latest_admin_note || '')}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
     <table>
@@ -415,7 +424,9 @@ function renderAccountRequestRows(rows, user) {
     return '<p>No account requests to review.</p>';
   }
 
-  const body = rows.map((request) => `
+  const body = rows
+    .map(
+      (request) => `
     <tr>
       <td>${escapeHtml(request.full_name)}</td>
       <td>${escapeHtml(request.email)}</td>
@@ -424,9 +435,13 @@ function renderAccountRequestRows(rows, user) {
       <td>${escapeHtml(request.status)}</td>
       <td><a class="button" href="#request-${escapeHtml(request.id)}">Review</a></td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
-  const modals = rows.map((request) => `
+  const modals = rows
+    .map(
+      (request) => `
     <section class="action-modal" id="request-${escapeHtml(request.id)}" aria-labelledby="request-${escapeHtml(request.id)}-title">
       <a class="modal-backdrop" href="#main-content" aria-label="Close review panel"></a>
       <div class="modal-panel" role="dialog" aria-modal="true">
@@ -467,7 +482,9 @@ function renderAccountRequestRows(rows, user) {
         </div>
       </div>
     </section>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
     <div class="table-scroll">
@@ -533,14 +550,18 @@ function renderContentReviewRows(rows) {
     return '<p>No content submissions are waiting for review.</p>';
   }
 
-  const body = rows.map((review) => `
+  const body = rows
+    .map(
+      (review) => `
     <tr>
       <td><a href="/admin/reviews/${escapeHtml(review.id)}">${escapeHtml(review.title)}</a></td>
       <td>${escapeHtml(CONTENT_TYPE_LABELS[review.content_type] || review.content_type)}</td>
       <td>${escapeHtml(review.office_name || '')}</td>
       <td>${escapeHtml(review.submitted_at || '')}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
     <div class="table-scroll">
@@ -603,7 +624,9 @@ async function readForm(request) {
 
 function parseContentDisposition(value) {
   const params = {};
-  for (const segment of String(value || '').split(';').slice(1)) {
+  for (const segment of String(value || '')
+    .split(';')
+    .slice(1)) {
     const index = segment.indexOf('=');
     if (index === -1) continue;
 
@@ -631,7 +654,9 @@ async function readMultipartForm(request) {
     throw error;
   }
 
-  const raw = (await readBodyBuffer(request, { maxBytes: MAX_MULTIPART_BODY_BYTES })).toString('latin1');
+  const raw = (await readBodyBuffer(request, { maxBytes: MAX_MULTIPART_BODY_BYTES })).toString(
+    'latin1',
+  );
   const parts = raw.split(`--${boundary}`);
   const fields = {};
   const files = {};
@@ -639,7 +664,10 @@ async function readMultipartForm(request) {
   for (const rawPart of parts) {
     if (!rawPart || rawPart === '--\r\n' || rawPart === '--') continue;
 
-    const part = rawPart.replace(/^\r\n/, '').replace(/\r\n--$/, '').replace(/\r\n$/, '');
+    const part = rawPart
+      .replace(/^\r\n/, '')
+      .replace(/\r\n--$/, '')
+      .replace(/\r\n$/, '');
     const separator = part.indexOf('\r\n\r\n');
     if (separator === -1) continue;
 
@@ -714,7 +742,9 @@ async function currentSession(redis, request) {
 }
 
 function getClientIp(request) {
-  const forwardedFor = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const forwardedFor = String(request.headers['x-forwarded-for'] || '')
+    .split(',')[0]
+    .trim();
   return forwardedFor || request.socket?.remoteAddress || 'unknown';
 }
 
@@ -746,7 +776,11 @@ async function incrementLoginAttempts(redis, key) {
 }
 
 function renderTooManyLoginAttempts(response) {
-  sendHtml(response, 429, renderLogin({ notice: 'Too many login attempts. Please try again later.' }));
+  sendHtml(
+    response,
+    429,
+    renderLogin({ notice: 'Too many login attempts. Please try again later.' }),
+  );
 }
 
 async function handleLoginPost({ request, response, pool, redis, secureCookies }) {
@@ -784,14 +818,18 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
     // Login should not fail only because the transient rate-limit key is unavailable.
   }
 
-  const session = await createSession(redis, {
-    id: user.id,
-    office_id: user.office_id,
-    email: user.email,
-    full_name: user.full_name,
-    name: user.full_name,
-    role: user.role,
-  }, { secure: secureCookies });
+  const session = await createSession(
+    redis,
+    {
+      id: user.id,
+      office_id: user.office_id,
+      email: user.email,
+      full_name: user.full_name,
+      name: user.full_name,
+      role: user.role,
+    },
+    { secure: secureCookies },
+  );
 
   response.writeHead(303, {
     location: '/admin',
@@ -826,7 +864,11 @@ async function handleRequestAccountPost({ request, response, pool }) {
   };
 
   if (!values.full_name || !values.email || !values.position) {
-    sendHtml(response, 400, renderAccountRequest({ notice: 'Full name, email, and position are required.' }));
+    sendHtml(
+      response,
+      400,
+      renderAccountRequest({ notice: 'Full name, email, and position are required.' }),
+    );
     return;
   }
 
@@ -966,15 +1008,19 @@ async function handleOfficeSubmissionsIndex({
   const state = listStateFromUrl(url || new URL(`http://localhost${basePath}`), { basePath });
   const officeId = Number(user.office_id);
   if (!Number.isInteger(officeId) || officeId < 1) {
-    sendHtml(response, 200, renderOfficeDashboard(user, [], {
-      state,
-      total: 0,
-      notice,
-      title,
-      heading,
-      activePath,
-      action: basePath,
-    }));
+    sendHtml(
+      response,
+      200,
+      renderOfficeDashboard(user, [], {
+        state,
+        total: 0,
+        notice,
+        title,
+        heading,
+        activePath,
+        action: basePath,
+      }),
+    );
     return;
   }
 
@@ -1019,15 +1065,19 @@ async function handleOfficeSubmissionsIndex({
     params,
   );
 
-  sendHtml(response, 200, renderOfficeDashboard(user, result.rows, {
-    state,
-    total: totalFromRows(result.rows),
-    notice,
-    title,
-    heading,
-    activePath,
-    action: basePath,
-  }));
+  sendHtml(
+    response,
+    200,
+    renderOfficeDashboard(user, result.rows, {
+      state,
+      total: totalFromRows(result.rows),
+      notice,
+      title,
+      heading,
+      activePath,
+      action: basePath,
+    }),
+  );
 }
 
 async function handleAccountRequestsIndex({ response, pool, user, url }) {
@@ -1042,7 +1092,9 @@ async function handleAccountRequestsIndex({ response, pool, user, url }) {
   }
   if (state.q) {
     params.push(likePattern(state.q));
-    filters.push(`(full_name ILIKE $${params.length} OR email ILIKE $${params.length} OR requested_office_name ILIKE $${params.length})`);
+    filters.push(
+      `(full_name ILIKE $${params.length} OR email ILIKE $${params.length} OR requested_office_name ILIKE $${params.length})`,
+    );
   }
   params.push(LIST_PAGE_SIZE, (state.page - 1) * LIST_PAGE_SIZE);
   const limitParam = params.length - 1;
@@ -1195,15 +1247,7 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
         RETURNING id
       `,
-      [
-        contentItem.id,
-        1,
-        'pending_review',
-        title,
-        body,
-        payload,
-        user.id,
-      ],
+      [contentItem.id, 1, 'pending_review', title, body, payload, user.id],
     );
 
     if (attachment) {
@@ -1277,7 +1321,11 @@ async function handleAttachmentMetadataCreate({ request, response, pool, user })
   const fileSize = Number(clean(metadata.file_size));
   const storagePath = clean(metadata.storage_path);
 
-  if (!VALID_ATTACHMENT_LINKED_TYPES.has(linkedType) || !Number.isInteger(linkedId) || linkedId < 1) {
+  if (
+    !VALID_ATTACHMENT_LINKED_TYPES.has(linkedType) ||
+    !Number.isInteger(linkedId) ||
+    linkedId < 1
+  ) {
     renderBadRequest(response, 'A valid linked item is required.', user);
     return;
   }
@@ -1352,15 +1400,7 @@ async function handleAttachmentMetadataCreate({ request, response, pool, user })
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id
     `,
-    [
-      linkedType,
-      linkedId,
-      originalFilename,
-      fileType,
-      fileSize,
-      storagePath,
-      user.id,
-    ],
+    [linkedType, linkedId, originalFilename, fileType, fileSize, storagePath, user.id],
   );
 
   sendJson(response, 201, { id: result.rows[0].id });
@@ -1538,7 +1578,15 @@ async function handleContentApprove({ response, pool, redis, user, id }) {
   redirect(response, '/admin/reviews?notice=approved');
 }
 
-async function handleContentReviewStatus({ request, response, pool, user, id, status, csrfProtection }) {
+async function handleContentReviewStatus({
+  request,
+  response,
+  pool,
+  user,
+  id,
+  status,
+  csrfProtection,
+}) {
   const form = await readForm(request);
   if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
 
@@ -1743,9 +1791,8 @@ function createAdminRouteHandler(options = {}) {
   return async function handleAdminRoutes(request, response, url) {
     const pathname = url.pathname;
     const isAdminPath = pathname === '/admin' || pathname.startsWith('/admin/');
-    const isPublicAdminPath = pathname === '/login'
-      || pathname === '/logout'
-      || pathname === '/request-account';
+    const isPublicAdminPath =
+      pathname === '/login' || pathname === '/logout' || pathname === '/request-account';
 
     if (!isAdminPath && !isPublicAdminPath) {
       return false;
@@ -1759,7 +1806,13 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
       if (request.method === 'POST') {
-        await handleLoginPost({ request, response, pool: services.pool, redis: services.redis, secureCookies });
+        await handleLoginPost({
+          request,
+          response,
+          pool: services.pool,
+          redis: services.redis,
+          secureCookies,
+        });
         return true;
       }
       methodNotAllowed(response, ['GET', 'POST']);
@@ -1783,9 +1836,10 @@ function createAdminRouteHandler(options = {}) {
 
     if (pathname === '/request-account') {
       if (request.method === 'GET') {
-        const notice = url.searchParams.get('submitted') === '1'
-          ? 'Your account request has been submitted for review.'
-          : '';
+        const notice =
+          url.searchParams.get('submitted') === '1'
+            ? 'Your account request has been submitted for review.'
+            : '';
         sendHtml(response, 200, renderAccountRequest({ notice }));
         return true;
       }
@@ -1805,9 +1859,8 @@ function createAdminRouteHandler(options = {}) {
       const user = await requireAdmin({ request, response, redis: services.redis });
       if (!user) return true;
 
-      const notice = url.searchParams.get('cache_refreshed') === '1'
-        ? 'Published chatbot cache refreshed.'
-        : '';
+      const notice =
+        url.searchParams.get('cache_refreshed') === '1' ? 'Published chatbot cache refreshed.' : '';
       await handleDashboard({ response, pool: services.pool, user, url, notice });
       return true;
     }
@@ -1821,7 +1874,15 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
 
-      if (!(await validateCsrf({ request, response, user, form: await readForm(request), csrfProtection }))) {
+      if (
+        !(await validateCsrf({
+          request,
+          response,
+          user,
+          form: await readForm(request),
+          csrfProtection,
+        }))
+      ) {
         return true;
       }
 
@@ -1873,9 +1934,10 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
 
-      const notice = url.searchParams.get('submitted') === '1'
-        ? 'Your content has been submitted for review.'
-        : '';
+      const notice =
+        url.searchParams.get('submitted') === '1'
+          ? 'Your content has been submitted for review.'
+          : '';
       sendHtml(response, 200, renderNewContentForm({ user, notice }));
       return true;
     }
@@ -1966,7 +2028,15 @@ function createAdminRouteHandler(options = {}) {
       }
 
       if (contentReviewAction.action === 'approve') {
-        if (!(await validateCsrf({ request, response, user, form: await readForm(request), csrfProtection }))) {
+        if (
+          !(await validateCsrf({
+            request,
+            response,
+            user,
+            form: await readForm(request),
+            csrfProtection,
+          }))
+        ) {
           return true;
         }
 

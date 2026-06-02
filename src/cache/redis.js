@@ -16,7 +16,7 @@ function setFallback(redis, key, payload, ttlSeconds) {
   const store = fallbackStore(redis);
   if (!store) return;
 
-  const expiresAt = ttlSeconds ? Date.now() + (ttlSeconds * 1000) : null;
+  const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : null;
   store.set(key, { payload, expiresAt });
 }
 
@@ -100,7 +100,7 @@ async function getJson(redis, key) {
   } catch {
     payload = getFallback(redis, key);
   }
-  if (payload == null) return null;
+  if (payload === null || payload === undefined) return null;
   return JSON.parse(payload);
 }
 

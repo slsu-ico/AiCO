@@ -39,7 +39,10 @@ function createResponse() {
 }
 
 test('escapeHtml escapes text that can break out of HTML', () => {
-  assert.equal(escapeHtml(`<script>alert("x")</script>&'`), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#39;');
+  assert.equal(
+    escapeHtml(`<script>alert("x")</script>&'`),
+    '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#39;',
+  );
   assert.equal(escapeHtml(null), '');
 });
 

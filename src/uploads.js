@@ -11,7 +11,10 @@ const ALLOWED_TYPES = new Map([
 ]);
 
 function normalizeContentType(contentType) {
-  return String(contentType ?? '').split(';', 1)[0].trim().toLowerCase();
+  return String(contentType ?? '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
 }
 
 function isAllowedFileType(contentType) {
@@ -48,8 +51,8 @@ function ensureInsideUploadDir(uploadDir, storagePath) {
   const resolvedStoragePath = path.resolve(storagePath);
 
   if (
-    resolvedStoragePath !== resolvedUploadDir
-    && !resolvedStoragePath.startsWith(`${resolvedUploadDir}${path.sep}`)
+    resolvedStoragePath !== resolvedUploadDir &&
+    !resolvedStoragePath.startsWith(`${resolvedUploadDir}${path.sep}`)
   ) {
     throw uploadError('Invalid upload storage path.');
   }
@@ -68,13 +71,15 @@ function isSafeStoragePath(storagePath, uploadDir = 'uploads') {
 
   const normalizedUploadDir = path.normalize(uploadDir);
   const resolvedUploadDir = path.resolve(normalizedUploadDir);
-  const resolvedStoragePath = raw.replaceAll('\\', '/').startsWith(`${uploadDir.replaceAll('\\', '/')}/`)
+  const resolvedStoragePath = raw
+    .replaceAll('\\', '/')
+    .startsWith(`${uploadDir.replaceAll('\\', '/')}/`)
     ? path.resolve(normalizedStoragePath)
     : path.resolve(normalizedUploadDir, normalizedStoragePath);
 
   return (
-    resolvedStoragePath !== resolvedUploadDir
-    && resolvedStoragePath.startsWith(`${resolvedUploadDir}${path.sep}`)
+    resolvedStoragePath !== resolvedUploadDir &&
+    resolvedStoragePath.startsWith(`${resolvedUploadDir}${path.sep}`)
   );
 }
 

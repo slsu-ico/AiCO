@@ -13,10 +13,7 @@ function poolOptionsFromConfig(config = {}) {
   const options = {
     connectionString: config.databaseUrl ?? config.connectionString,
     max: positiveInteger(config.max ?? config.poolMax, DEFAULT_POOL_MAX),
-    idleTimeoutMillis: positiveInteger(
-      config.idleTimeoutMillis,
-      DEFAULT_IDLE_TIMEOUT_MILLIS,
-    ),
+    idleTimeoutMillis: positiveInteger(config.idleTimeoutMillis, DEFAULT_IDLE_TIMEOUT_MILLIS),
     connectionTimeoutMillis: positiveInteger(
       config.connectionTimeoutMillis,
       DEFAULT_CONNECTION_TIMEOUT_MILLIS,

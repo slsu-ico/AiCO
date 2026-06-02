@@ -84,7 +84,9 @@ test('seedInitialData inserts ICO office, bootstrap admin, and published service
     services.map((service) => service.id),
   );
 
-  const officeInsert = pool.client.calls.find((call) => sqlIncludes(call.text, 'INSERT INTO offices'));
+  const officeInsert = pool.client.calls.find((call) =>
+    sqlIncludes(call.text, 'INSERT INTO offices'),
+  );
   assert.deepEqual(officeInsert.params, ['Information and Communications Office', 'ICO']);
 
   const adminInsert = pool.client.calls.find((call) => sqlIncludes(call.text, 'INSERT INTO users'));
@@ -94,15 +96,21 @@ test('seedInitialData inserts ICO office, bootstrap admin, and published service
   assert.notEqual(adminInsert.params[2], 'Secret123!');
   assert.equal(adminInsert.params[3], 'Bootstrap Administrator');
 
-  const lockCall = pool.client.calls.find((call) => sqlIncludes(call.text, 'pg_advisory_xact_lock'));
+  const lockCall = pool.client.calls.find((call) =>
+    sqlIncludes(call.text, 'pg_advisory_xact_lock'),
+  );
   assert.ok(lockCall);
   assert.deepEqual(lockCall.params, ['seed:initial-data']);
 
-  const serviceLookups = pool.client.calls.filter((call) => call.text.includes("structured_payload->>'id'"));
+  const serviceLookups = pool.client.calls.filter((call) =>
+    call.text.includes("structured_payload->>'id'"),
+  );
   assert.equal(serviceLookups.length, services.length);
   assert.ok(serviceLookups.every((call) => call.params[1] === 'citizens_charter_service'));
 
-  const itemInserts = pool.client.calls.filter((call) => sqlIncludes(call.text, 'INSERT INTO content_items'));
+  const itemInserts = pool.client.calls.filter((call) =>
+    sqlIncludes(call.text, 'INSERT INTO content_items'),
+  );
   assert.equal(itemInserts.length, services.length);
   assert.ok(itemInserts.every((call) => call.params[1] === 'citizens_charter_service'));
 });
@@ -128,7 +136,9 @@ test('seedInitialData skips services that already have a published payload id', 
     bootstrapAdminPassword: 'Secret123!',
   });
 
-  const versionInserts = pool.client.calls.filter((call) => sqlIncludes(call.text, 'INSERT INTO content_versions'));
+  const versionInserts = pool.client.calls.filter((call) =>
+    sqlIncludes(call.text, 'INSERT INTO content_versions'),
+  );
   assert.equal(result.servicesSkipped, 1);
   assert.equal(result.servicesImported, services.length - 1);
   assert.equal(versionInserts.length, services.length - 1);
@@ -152,7 +162,8 @@ test('seedInitialData is idempotent when every service already exists', async ()
   assert.equal(result.servicesSkipped, services.length);
   assert.equal(result.servicesImported, 0);
   assert.equal(
-    pool.client.calls.filter((call) => sqlIncludes(call.text, 'INSERT INTO content_versions')).length,
+    pool.client.calls.filter((call) => sqlIncludes(call.text, 'INSERT INTO content_versions'))
+      .length,
     0,
   );
   assert.equal(commandCalls(pool).at(-2), 'COMMIT');

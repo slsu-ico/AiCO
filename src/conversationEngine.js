@@ -36,20 +36,6 @@ function serviceQuickReplyTitle(service) {
   return service.service_name.slice(0, 20).trim();
 }
 
-function audienceReply() {
-  return {
-    text: [
-      'Hello! I can help you find ICO services from the Citizen\'s Charter.',
-      '',
-      'Are you an SLSU internal unit/office or an external partner?',
-    ].join('\n'),
-    quickReplies: [
-      quickReply('SLSU internal unit/office', 'AUDIENCE_INTERNAL'),
-      quickReply('External partner', 'AUDIENCE_EXTERNAL'),
-    ],
-  };
-}
-
 function servicePayload(service) {
   return `SERVICE_${service.id}`;
 }
@@ -67,7 +53,9 @@ function serviceListReply(audience, services = loadServices()) {
       '',
       'Please choose a service.',
     ].join('\n'),
-    quickReplies: matchingServices.map((service) => quickReply(serviceQuickReplyTitle(service), servicePayload(service))),
+    quickReplies: matchingServices.map((service) =>
+      quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
+    ),
   };
 }
 
@@ -75,14 +63,10 @@ function serviceListAllReply(services = loadServices()) {
   const lines = services.map((service, index) => `${index + 1}. ${service.service_name}`);
 
   return {
-    text: [
-      'Here are the ICO services:',
-      '',
-      ...lines,
-      '',
-      'Please choose a service.',
-    ].join('\n'),
-    quickReplies: services.map((service) => quickReply(serviceQuickReplyTitle(service), servicePayload(service))),
+    text: ['Here are the ICO services:', '', ...lines, '', 'Please choose a service.'].join('\n'),
+    quickReplies: services.map((service) =>
+      quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
+    ),
   };
 }
 
@@ -122,11 +106,7 @@ function serviceGuideReply(service) {
 }
 
 function faqSearchText(faq) {
-  return [
-    faq.question,
-    faq.answer,
-    ...(Array.isArray(faq.keywords) ? faq.keywords : []),
-  ].join(' ');
+  return [faq.question, faq.answer, ...(Array.isArray(faq.keywords) ? faq.keywords : [])].join(' ');
 }
 
 function searchFaqs(query, faqs = []) {
@@ -147,11 +127,7 @@ function searchFaqs(query, faqs = []) {
 
 function faqReply(faq) {
   return {
-    text: [
-      faq.question,
-      '',
-      faq.answer,
-    ].join('\n'),
+    text: [faq.question, '', faq.answer].join('\n'),
     quickReplies: [
       quickReply('Back to services', 'BACK_TO_SERVICES'),
       quickReply('Start over', 'BACK_TO_START'),
@@ -163,7 +139,7 @@ function faqReply(faq) {
 function handoffReply() {
   return {
     text: [
-      'I can only confirm details listed in the ICO Citizen\'s Charter.',
+      "I can only confirm details listed in the ICO Citizen's Charter.",
       '',
       'For requests that need staff judgment, exceptions, approvals, or information outside the charter, please contact ICO directly:',
       '',
@@ -181,16 +157,6 @@ function handoffReply() {
 
 function normalizeMessage(message) {
   return String(message || '').trim();
-}
-
-function isInternalSelection(message) {
-  const value = message.toLowerCase();
-  return message === 'AUDIENCE_INTERNAL' || value.includes('internal') || value.includes('slsu unit');
-}
-
-function isExternalSelection(message) {
-  const value = message.toLowerCase();
-  return message === 'AUDIENCE_EXTERNAL' || value.includes('external') || value.includes('partner');
 }
 
 function cloneSession(session) {

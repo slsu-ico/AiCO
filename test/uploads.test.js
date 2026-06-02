@@ -36,7 +36,10 @@ test('saveUploadedFile sanitizes the filename and writes inside uploadDir', asyn
 });
 
 test('sanitizeOriginalFilename returns basename without control characters', () => {
-  assert.equal(sanitizeOriginalFilename('..\\unsafe\u0000 path\\Board\nResolution.pdf'), 'BoardResolution.pdf');
+  assert.equal(
+    sanitizeOriginalFilename('..\\unsafe\u0000 path\\Board\nResolution.pdf'),
+    'BoardResolution.pdf',
+  );
   assert.equal(sanitizeOriginalFilename('\u0000\u001f'), 'attachment');
 });
 

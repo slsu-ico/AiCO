@@ -28,6 +28,7 @@
 ### Task 1: Project Skeleton
 
 **Files:**
+
 - Create: `package.json`
 - Create: `.env.example`
 - Create: `README.md`
@@ -71,6 +72,7 @@ Add commands for running tests, starting locally, and configuring Meta webhook c
 ### Task 2: Service Knowledge Base
 
 **Files:**
+
 - Create: `data/services.json`
 - Create: `src/serviceRepository.js`
 - Test: `test/serviceRepository.test.js`
@@ -102,6 +104,7 @@ Expected: PASS.
 ### Task 3: Conversation Engine
 
 **Files:**
+
 - Create: `src/conversationEngine.js`
 - Test: `test/conversationEngine.test.js`
 
@@ -128,6 +131,7 @@ Expected: PASS.
 ### Task 4: Messenger Webhook Server
 
 **Files:**
+
 - Create: `src/config.js`
 - Create: `src/messengerApi.js`
 - Create: `src/server.js`
@@ -156,6 +160,7 @@ Expected: PASS.
 ### Task 5: Final Verification
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run full tests**

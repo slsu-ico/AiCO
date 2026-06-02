@@ -48,9 +48,8 @@ function bodyTooLargeError(maxBytes) {
 }
 
 function readBodyBuffer(request, options = {}) {
-  const maxBytes = Number.isFinite(options.maxBytes) && options.maxBytes > 0
-    ? options.maxBytes
-    : null;
+  const maxBytes =
+    Number.isFinite(options.maxBytes) && options.maxBytes > 0 ? options.maxBytes : null;
 
   return new Promise((resolve, reject) => {
     const chunks = [];

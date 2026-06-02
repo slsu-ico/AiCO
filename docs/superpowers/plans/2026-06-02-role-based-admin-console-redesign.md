@@ -21,6 +21,7 @@
 ## Task 1: Layout Shell Primitives
 
 **Files:**
+
 - Modify: `src/layout.js`
 - Test: `test/httpUtils.test.js`
 
@@ -63,7 +64,8 @@ test('pageLayout renders optional topbar actions', () => {
   const html = pageLayout({
     title: 'Admin dashboard',
     user: { role: 'admin', name: 'Bootstrap Admin' },
-    topbarActions: '<form method="post" action="/admin/cache/refresh"><button type="submit">Refresh cache</button></form>',
+    topbarActions:
+      '<form method="post" action="/admin/cache/refresh"><button type="submit">Refresh cache</button></form>',
     body: '<p>Welcome</p>',
   });
 
@@ -122,14 +124,16 @@ const navByRole = {
   admin: [
     {
       label: 'Overview',
-      items: [
-        { href: '/admin', label: 'Dashboard' },
-      ],
+      items: [{ href: '/admin', label: 'Dashboard' }],
     },
     {
       label: 'Manage',
       items: [
-        { href: '/admin/account-requests', label: 'Account requests', countKey: 'pendingAccountRequests' },
+        {
+          href: '/admin/account-requests',
+          label: 'Account requests',
+          countKey: 'pendingAccountRequests',
+        },
         { href: '/admin/reviews', label: 'Content reviews', countKey: 'pendingContentReviews' },
       ],
     },
@@ -137,9 +141,7 @@ const navByRole = {
   office_user: [
     {
       label: 'Overview',
-      items: [
-        { href: '/admin', label: 'Dashboard' },
-      ],
+      items: [{ href: '/admin', label: 'Dashboard' }],
     },
     {
       label: 'Submit',
@@ -186,7 +188,8 @@ function renderNav({ user, activePath = '', navCounts = {} }) {
           const current = active ? ' aria-current="page"' : '';
           const className = active ? ' class="nav-link is-active"' : ' class="nav-link"';
           const rawCount = item.countKey ? Number(navCounts[item.countKey] || 0) : 0;
-          const badge = rawCount > 0 ? `<span class="nav-badge">${escapeHtml(rawCount)}</span>` : '';
+          const badge =
+            rawCount > 0 ? `<span class="nav-badge">${escapeHtml(rawCount)}</span>` : '';
           return `<a${className}${current} href="${escapeHtml(item.href)}"><span>${escapeHtml(item.label)}</span>${badge}</a>`;
         })
         .join('');
@@ -231,7 +234,9 @@ In the topbar markup, render a header text block and action slot:
 <header class="topbar">
   <div class="topbar-title">
     <h1>${safeTitle}</h1>
-    ${safeSubtitle ? `<p>${safeSubtitle}</p>` : ''}
+    ${safeSubtitle ? `
+    <p>${safeSubtitle}</p>
+    ` : ''}
   </div>
   <div class="topbar-actions">
     ${topbarActions || '<span class="status-pill">Chatbot status</span>'}
@@ -376,6 +381,7 @@ rtk git commit -m "Improve role-based admin shell layout"
 ## Task 2: Admin Dashboard Counts And Cache Refresh
 
 **Files:**
+
 - Modify: `src/adminRoutes.js`
 - Test: `test/adminRoutes.test.js`
 
@@ -384,12 +390,12 @@ rtk git commit -m "Improve role-based admin shell layout"
 Add this assertion block to the existing `admin dashboard shows pending account, pending review, and published counts` test after the published count assertion:
 
 ```js
-    assert.match(html, /href="\/admin\/account-requests"[\s\S]*nav-badge">4<\/span>/);
-    assert.match(html, /href="\/admin\/reviews"[\s\S]*nav-badge">7<\/span>/);
-    assert.match(html, /href="\/admin\/account-requests" class="metric-card/);
-    assert.match(html, /href="\/admin\/reviews" class="metric-card/);
-    assert.match(html, /action="\/admin\/cache\/refresh"/);
-    assert.match(html, /Refresh cache/);
+assert.match(html, /href="\/admin\/account-requests"[\s\S]*nav-badge">4<\/span>/);
+assert.match(html, /href="\/admin\/reviews"[\s\S]*nav-badge">7<\/span>/);
+assert.match(html, /href="\/admin\/account-requests" class="metric-card/);
+assert.match(html, /href="\/admin\/reviews" class="metric-card/);
+assert.match(html, /action="\/admin\/cache\/refresh"/);
+assert.match(html, /Refresh cache/);
 ```
 
 Add these new tests near the content approval cache test:
@@ -543,9 +549,10 @@ function renderAdminDashboard(user, counts, notice = '') {
 Update `handleDashboard` so the admin path passes notices:
 
 ```js
-const notice = url?.searchParams?.get('cache_refreshed') === '1'
-  ? 'Published chatbot cache has been refreshed.'
-  : '';
+const notice =
+  url?.searchParams?.get('cache_refreshed') === '1'
+    ? 'Published chatbot cache has been refreshed.'
+    : '';
 sendHtml(response, 200, renderAdminDashboard(user, result.rows[0] || {}, notice));
 ```
 
@@ -601,6 +608,7 @@ rtk git commit -m "Add admin dashboard nav counts and cache refresh"
 ## Task 3: Shared Visual Components And Status Badges
 
 **Files:**
+
 - Modify: `src/adminRoutes.js`
 - Modify: `src/layout.js`
 - Test: `test/adminRoutes.test.js`
@@ -610,21 +618,21 @@ rtk git commit -m "Add admin dashboard nav counts and cache refresh"
 In the existing `office dashboard shows submissions with status and latest admin note` test, replace the plain status assertion:
 
 ```js
-    assert.match(html, /needs revision/);
+assert.match(html, /needs revision/);
 ```
 
 with:
 
 ```js
-    assert.match(html, /status-badge status-needs-revision/);
-    assert.match(html, /<span class="status-dot" aria-hidden="true"><\/span>Needs revision/);
+assert.match(html, /status-badge status-needs-revision/);
+assert.match(html, /<span class="status-dot" aria-hidden="true"><\/span>Needs revision/);
 ```
 
 In the account requests index test, or create one if it does not exist, assert:
 
 ```js
-    assert.match(html, /person-avatar" aria-hidden="true">MS<\/span>/);
-    assert.match(html, /Maria Santos/);
+assert.match(html, /person-avatar" aria-hidden="true">MS<\/span>/);
+assert.match(html, /Maria Santos/);
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -779,6 +787,7 @@ rtk git commit -m "Add status badges and people avatars"
 ## Task 4: Office Content Form Upload Zone And Sections
 
 **Files:**
+
 - Modify: `src/adminRoutes.js`
 - Modify: `src/layout.js`
 - Test: `test/adminRoutes.test.js`
@@ -788,11 +797,11 @@ rtk git commit -m "Add status badges and people avatars"
 In `renders new content form only for authenticated office users`, add:
 
 ```js
-    assert.match(html, /form-section/);
-    assert.match(html, /Content basics/);
-    assert.match(html, /Service details/);
-    assert.match(html, /upload-zone/);
-    assert.match(html, /PDF, PNG, JPG, JPEG, or DOCX/);
+assert.match(html, /form-section/);
+assert.match(html, /Content basics/);
+assert.match(html, /Service details/);
+assert.match(html, /upload-zone/);
+assert.match(html, /PDF, PNG, JPG, JPEG, or DOCX/);
 ```
 
 - [ ] **Step 2: Run test to verify failure**
@@ -954,6 +963,7 @@ rtk git commit -m "Redesign office content form"
 ## Task 5: Content Review Workspace Actions
 
 **Files:**
+
 - Modify: `src/adminRoutes.js`
 - Modify: `src/layout.js`
 - Test: `test/adminRoutes.test.js`
@@ -963,13 +973,13 @@ rtk git commit -m "Redesign office content form"
 In the existing content review detail render test, add these assertions after checking the submitted title/body:
 
 ```js
-    assert.match(html, /review-workspace/);
-    assert.match(html, /decision-grid/);
-    assert.match(html, /decision-card decision-approve/);
-    assert.match(html, /Approve and publish/);
-    assert.match(html, /decision-card decision-revise/);
-    assert.match(html, /Needs revision/);
-    assert.match(html, /decision-card decision-reject/);
+assert.match(html, /review-workspace/);
+assert.match(html, /decision-grid/);
+assert.match(html, /decision-card decision-approve/);
+assert.match(html, /Approve and publish/);
+assert.match(html, /decision-card decision-revise/);
+assert.match(html, /Needs revision/);
+assert.match(html, /decision-card decision-reject/);
 ```
 
 - [ ] **Step 2: Run test to verify failure**
@@ -1134,6 +1144,7 @@ rtk git commit -m "Redesign content review workspace"
 ## Task 6: Final Integration And Full Verification
 
 **Files:**
+
 - Modify: files changed by formatting or test fixes only
 - Test: full test suite
 

@@ -97,6 +97,7 @@ Rules:
 ## Task 1: Dependencies, Config, And Git Hygiene
 
 **Files:**
+
 - Modify `package.json`
 - Modify `src/config.js`
 - Modify `.env.example`
@@ -126,6 +127,7 @@ Steps:
 ## Task 2: PostgreSQL Schema And Migration
 
 **Files:**
+
 - Create `src/db/schema.sql`
 - Create `src/db/postgres.js`
 - Create `src/db/migrate.js`
@@ -144,6 +146,7 @@ Steps:
 ## Task 3: Seed Initial Office, Admin, And Charter Services
 
 **Files:**
+
 - Create `src/db/seed.js`
 - Create `test/seed.test.js`
 
@@ -159,6 +162,7 @@ Steps:
 ## Task 4: Redis Client And Session Authentication
 
 **Files:**
+
 - Create `src/cache/redis.js`
 - Create `src/auth.js`
 - Create `test/auth.test.js`
@@ -176,6 +180,7 @@ Steps:
 ## Task 5: HTTP Utilities And Shared Layout
 
 **Files:**
+
 - Create `src/httpUtils.js`
 - Create `src/layout.js`
 - Create `test/httpUtils.test.js`
@@ -190,6 +195,7 @@ Steps:
 ## Task 6: Login And Account Request Flow
 
 **Files:**
+
 - Create `src/adminRoutes.js`
 - Modify `src/server.js`
 - Create `test/adminRoutes.test.js`
@@ -207,6 +213,7 @@ Steps:
 ## Task 7: Admin Account Request Review
 
 **Files:**
+
 - Modify `src/adminRoutes.js`
 - Modify `test/adminRoutes.test.js`
 
@@ -222,6 +229,7 @@ Steps:
 ## Task 8: Office Content Submission
 
 **Files:**
+
 - Modify `src/adminRoutes.js`
 - Modify `test/adminRoutes.test.js`
 
@@ -238,6 +246,7 @@ Steps:
 ## Task 9: Admin Content Review And Cache Invalidation
 
 **Files:**
+
 - Modify `src/adminRoutes.js`
 - Modify `src/publishedContentRepository.js`
 - Modify `test/adminRoutes.test.js`
@@ -255,6 +264,7 @@ Steps:
 ## Task 10: Published Chatbot Repository
 
 **Files:**
+
 - Create `src/publishedContentRepository.js`
 - Modify `src/server.js`
 - Create `test/publishedContentRepository.test.js`
@@ -272,6 +282,7 @@ Steps:
 ## Task 11: Attachment Storage
 
 **Files:**
+
 - Create `src/uploads.js`
 - Modify `src/adminRoutes.js`
 - Create `test/uploads.test.js`
@@ -289,6 +300,7 @@ Steps:
 ## Task 12: Dashboards, Documentation, And Push
 
 **Files:**
+
 - Modify `src/adminRoutes.js`
 - Modify `README.md`
 

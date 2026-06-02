@@ -1,0 +1,6 @@
+.vercel
+coverage
+node_modules
+uploads
+server.err.log
+server.out.log

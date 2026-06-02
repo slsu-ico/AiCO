@@ -78,7 +78,9 @@ function createRequestHandler(options = {}) {
     if (!senderId) return;
     if (!options.redis) return;
 
-    await setJson(options.redis, `bot_session:${senderId}`, session, { ttlSeconds: BOT_SESSION_TTL_SECONDS });
+    await setJson(options.redis, `bot_session:${senderId}`, session, {
+      ttlSeconds: BOT_SESSION_TTL_SECONDS,
+    });
   }
 
   const handleAdminRoutes = createAdminRouteHandler({
@@ -90,9 +92,11 @@ function createRequestHandler(options = {}) {
     csrfProtection: options.csrfProtection,
   });
 
-  const sendMessage = options.sendMessage || (async (recipientId, reply) => {
-    await sendMessengerMessage(options.pageAccessToken, recipientId, reply);
-  });
+  const sendMessage =
+    options.sendMessage ||
+    (async (recipientId, reply) => {
+      await sendMessengerMessage(options.pageAccessToken, recipientId, reply);
+    });
 
   return async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
@@ -120,7 +124,7 @@ function createRequestHandler(options = {}) {
         let body;
         try {
           body = await readJson(request);
-        } catch (error) {
+        } catch {
           sendText(response, 400, 'Invalid JSON');
           return;
         }

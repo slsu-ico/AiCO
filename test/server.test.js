@@ -23,7 +23,9 @@ test('verifies Messenger webhook with the correct token', async () => {
   const baseUrl = await listen(server);
 
   try {
-    const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=secret&hub.challenge=abc123`);
+    const response = await fetch(
+      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=secret&hub.challenge=abc123`,
+    );
     const body = await response.text();
 
     assert.equal(response.status, 200);
@@ -38,7 +40,9 @@ test('rejects Messenger webhook verification with the wrong token', async () => 
   const baseUrl = await listen(server);
 
   try {
-    const response = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=abc123`);
+    const response = await fetch(
+      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=abc123`,
+    );
     const body = await response.text();
 
     assert.equal(response.status, 403);
@@ -92,21 +96,23 @@ test('handles Messenger POST events with injected services', async () => {
   const sent = [];
   const server = createServer({
     verifyToken: 'secret',
-    services: [{
-      id: 'custom-service',
-      service_name: 'Custom Published Service',
-      description: 'A service loaded from the caller.',
-      audience: 'internal',
-      office_or_unit: 'International Office',
-      classification: 'Simple',
-      who_may_avail: 'SLSU internal unit/office',
-      requirements: ['Request letter'],
-      submission_timeline: ['Send documents to ICO'],
-      official_link: 'https://slsu.edu.ph',
-      fees: 'None',
-      processing_time: '1 day',
-      css_reminder: 'Please answer the CSS form.',
-    }],
+    services: [
+      {
+        id: 'custom-service',
+        service_name: 'Custom Published Service',
+        description: 'A service loaded from the caller.',
+        audience: 'internal',
+        office_or_unit: 'International Office',
+        classification: 'Simple',
+        who_may_avail: 'SLSU internal unit/office',
+        requirements: ['Request letter'],
+        submission_timeline: ['Send documents to ICO'],
+        official_link: 'https://slsu.edu.ph',
+        fees: 'None',
+        processing_time: '1 day',
+        css_reminder: 'Please answer the CSS form.',
+      },
+    ],
     sendMessage: async (recipientId, reply) => {
       sent.push({ recipientId, reply });
     },
@@ -162,23 +168,25 @@ test('loads published services for each Messenger event so Redis invalidation ca
 
       serviceQueryCount += 1;
       return {
-        rows: [{
-          structured_payload: {
-            id: `dynamic-service-${serviceQueryCount}`,
-            service_name: `Dynamic Service ${serviceQueryCount}`,
-            description: 'A service loaded from PostgreSQL.',
-            audience: 'internal',
-            office_or_unit: 'International Office',
-            classification: 'Simple',
-            who_may_avail: 'SLSU internal unit/office',
-            requirements: ['Request letter'],
-            submission_timeline: ['Send documents to ICO'],
-            official_link: 'https://slsu.edu.ph',
-            fees: 'None',
-            processing_time: '1 day',
-            css_reminder: 'Please answer the CSS form.',
+        rows: [
+          {
+            structured_payload: {
+              id: `dynamic-service-${serviceQueryCount}`,
+              service_name: `Dynamic Service ${serviceQueryCount}`,
+              description: 'A service loaded from PostgreSQL.',
+              audience: 'internal',
+              office_or_unit: 'International Office',
+              classification: 'Simple',
+              who_may_avail: 'SLSU internal unit/office',
+              requirements: ['Request letter'],
+              submission_timeline: ['Send documents to ICO'],
+              official_link: 'https://slsu.edu.ph',
+              fees: 'None',
+              processing_time: '1 day',
+              css_reminder: 'Please answer the CSS form.',
+            },
           },
-        }],
+        ],
       };
     },
   };
@@ -235,12 +243,14 @@ test('loads published FAQs for Messenger events', async () => {
       }
       if (params[0] === 'faq') {
         return {
-          rows: [{
-            structured_payload: {
-              question: 'Where can I get official templates?',
-              answer: 'Email reports@slsu.edu.ph for official templates.',
+          rows: [
+            {
+              structured_payload: {
+                question: 'Where can I get official templates?',
+                answer: 'Email reports@slsu.edu.ph for official templates.',
+              },
             },
-          }],
+          ],
         };
       }
       throw new Error(`Unexpected content type: ${params[0]}`);
@@ -262,7 +272,9 @@ test('loads published FAQs for Messenger events', async () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         object: 'page',
-        entry: [{ messaging: [{ sender: { id: 'user-1' }, message: { text: 'official templates' } }] }],
+        entry: [
+          { messaging: [{ sender: { id: 'user-1' }, message: { text: 'official templates' } }] },
+        ],
       }),
     });
 
@@ -280,21 +292,23 @@ test('does not persist bot sessions in process memory when Redis is unavailable'
   const sent = [];
   const server = createServer({
     verifyToken: 'secret',
-    services: [{
-      id: 'visa-assistance',
-      service_name: 'Visa Assistance',
-      description: 'A service loaded from the caller.',
-      audience: 'internal',
-      office_or_unit: 'International Office',
-      classification: 'Simple',
-      who_may_avail: 'SLSU internal unit/office',
-      requirements: ['Request letter'],
-      submission_timeline: ['Send documents to ICO'],
-      official_link: 'https://slsu.edu.ph',
-      fees: 'None',
-      processing_time: '1 day',
-      css_reminder: 'Please answer the CSS form.',
-    }],
+    services: [
+      {
+        id: 'visa-assistance',
+        service_name: 'Visa Assistance',
+        description: 'A service loaded from the caller.',
+        audience: 'internal',
+        office_or_unit: 'International Office',
+        classification: 'Simple',
+        who_may_avail: 'SLSU internal unit/office',
+        requirements: ['Request letter'],
+        submission_timeline: ['Send documents to ICO'],
+        official_link: 'https://slsu.edu.ph',
+        fees: 'None',
+        processing_time: '1 day',
+        css_reminder: 'Please answer the CSS form.',
+      },
+    ],
     sendMessage: async (recipientId, reply) => {
       sent.push({ recipientId, reply });
     },

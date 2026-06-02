@@ -89,7 +89,10 @@ test('getSession loads a valid session from a cookie header', async () => {
   const redis = new FakeRedis();
   const created = await createSession(redis, { id: 9, email: 'office@slsu.edu.ph' });
 
-  const session = await getSession(redis, `theme=light; ${AICO_SESSION_COOKIE}=${created.cookieValue}`);
+  const session = await getSession(
+    redis,
+    `theme=light; ${AICO_SESSION_COOKIE}=${created.cookieValue}`,
+  );
 
   assert.equal(session.id, created.sessionId);
   assert.deepEqual(session.user, { id: 9, email: 'office@slsu.edu.ph' });
@@ -114,7 +117,10 @@ test('getSession rejects missing or tampered session cookies', async () => {
 
   assert.equal(await getSession(redis, ''), null);
   assert.equal(await getSession(redis, `${AICO_SESSION_COOKIE}=not-a-uuid`), null);
-  assert.equal(await getSession(redis, `${AICO_SESSION_COOKIE}=00000000-0000-4000-8000-000000000000`), null);
+  assert.equal(
+    await getSession(redis, `${AICO_SESSION_COOKIE}=00000000-0000-4000-8000-000000000000`),
+    null,
+  );
 });
 
 test('getSession and destroySession reject malformed percent-encoded session cookies', async () => {

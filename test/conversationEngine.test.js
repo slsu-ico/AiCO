@@ -1,10 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const {
-  createInitialSession,
-  handleUserMessage,
-} = require('../src/conversationEngine');
+const { createInitialSession, handleUserMessage } = require('../src/conversationEngine');
 
 test('starts with requester type choices', () => {
   const session = createInitialSession();
@@ -58,16 +55,27 @@ test('uses Messenger-safe quick reply labels for service lists', () => {
   assert.ok(result.replies[0].quickReplies.length <= 13);
   assert.ok(result.replies[0].quickReplies.every((reply) => reply.title.length <= 20));
   assert.ok(result.replies[0].quickReplies.some((reply) => reply.title === 'Audiovisual'));
-  assert.ok(result.replies[0].quickReplies.some((reply) => reply.payload === 'SERVICE_internal-audiovisual-production'));
+  assert.ok(
+    result.replies[0].quickReplies.some(
+      (reply) => reply.payload === 'SERVICE_internal-audiovisual-production',
+    ),
+  );
 });
 
 test('answers published FAQs before handing off', () => {
   const session = createInitialSession();
-  const faqs = [{
-    question: 'Where can I get official templates?',
-    answer: 'Email reports@slsu.edu.ph for official templates.',
-  }];
-  const result = handleUserMessage(session, 'I need the templates for social media posts', undefined, faqs);
+  const faqs = [
+    {
+      question: 'Where can I get official templates?',
+      answer: 'Email reports@slsu.edu.ph for official templates.',
+    },
+  ];
+  const result = handleUserMessage(
+    session,
+    'I need the templates for social media posts',
+    undefined,
+    faqs,
+  );
 
   assert.equal(result.session.state, 'viewing_faq');
   assert.match(result.replies[0].text, /Where can I get official templates\?/);
@@ -79,7 +87,10 @@ test('hands off when free text is outside the charter', () => {
   const result = handleUserMessage(session, 'How do I enroll as a first year student?');
 
   assert.equal(result.session.state, 'handoff');
-  assert.match(result.replies[0].text, /I can only confirm details listed in the ICO Citizen's Charter/);
+  assert.match(
+    result.replies[0].text,
+    /I can only confirm details listed in the ICO Citizen's Charter/,
+  );
   assert.match(result.replies[0].text, /reports@slsu\.edu\.ph/);
   assert.match(result.replies[0].text, /https:\/\/www\.slsu\.edu\.ph/);
   assert.ok(result.replies[0].quickReplies.some((reply) => reply.payload === 'BACK_TO_START'));
