@@ -209,6 +209,53 @@ test('loads published services for each Messenger event so Redis invalidation ca
   }
 });
 
+test('does not persist bot sessions in process memory when Redis is unavailable', async () => {
+  const sent = [];
+  const server = createServer({
+    verifyToken: 'secret',
+    services: [{
+      id: 'visa-assistance',
+      service_name: 'Visa Assistance',
+      description: 'A service loaded from the caller.',
+      audience: 'internal',
+      office_or_unit: 'International Office',
+      classification: 'Simple',
+      who_may_avail: 'SLSU internal unit/office',
+      requirements: ['Request letter'],
+      submission_timeline: ['Send documents to ICO'],
+      official_link: 'https://slsu.edu.ph',
+      fees: 'None',
+      processing_time: '1 day',
+      css_reminder: 'Please answer the CSS form.',
+    }],
+    sendMessage: async (recipientId, reply) => {
+      sent.push({ recipientId, reply });
+    },
+  });
+  const baseUrl = await listen(server);
+
+  async function sendText(senderId, text) {
+    return fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        object: 'page',
+        entry: [{ messaging: [{ sender: { id: senderId }, message: { text } }] }],
+      }),
+    });
+  }
+
+  try {
+    assert.equal((await sendText('user-1', 'visa')).status, 200);
+    assert.equal((await sendText('user-1', 'BACK_TO_SERVICES')).status, 200);
+
+    assert.match(sent[0].reply.text, /Visa Assistance/);
+    assert.match(sent[1].reply.text, /I can only confirm details listed/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('startServer rejects default Messenger verify token in production', () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalVerifyToken = process.env.MESSENGER_VERIFY_TOKEN;

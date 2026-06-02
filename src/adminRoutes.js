@@ -25,6 +25,7 @@ const {
   saveUploadedFile,
   sanitizeOriginalFilename,
 } = require('./uploads');
+const { warmPublishedContentCache } = require('./publishedContentRepository');
 
 const VALID_ROLES = new Set(['admin', 'office_user']);
 const VALID_CONTENT_TYPES = new Set([
@@ -40,6 +41,7 @@ const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_TTL_SECONDS = 15 * 60;
 const MULTIPART_FIELD_OVERHEAD_BYTES = 128 * 1024;
 const MAX_MULTIPART_BODY_BYTES = DEFAULT_MAX_BYTES + MULTIPART_FIELD_OVERHEAD_BYTES;
+const LIST_PAGE_SIZE = 20;
 
 const FIELD_LIMITS = {
   full_name: 160,
@@ -177,6 +179,104 @@ function formatStatus(status) {
   return clean(status).replace(/_/g, ' ');
 }
 
+function parsePositiveInteger(value, fallback = 1) {
+  const parsed = Number(clean(value));
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function listStateFromUrl(url, options = {}) {
+  return {
+    page: parsePositiveInteger(url.searchParams.get('page'), 1),
+    q: clean(url.searchParams.get('q')),
+    status: clean(url.searchParams.get('status')),
+    type: clean(url.searchParams.get('type')),
+    notice: clean(url.searchParams.get('notice')),
+    basePath: options.basePath || url.pathname,
+  };
+}
+
+function likePattern(value) {
+  return `%${value}%`;
+}
+
+function totalFromRows(rows) {
+  return Number(rows[0]?.total_count || 0);
+}
+
+function noticeText(kind, messages) {
+  return messages[kind] || '';
+}
+
+function option(value, label, selected) {
+  const selectedAttr = selected === value ? ' selected' : '';
+  return `<option value="${escapeHtml(value)}"${selectedAttr}>${escapeHtml(label)}</option>`;
+}
+
+function renderFilterBar({ action, state, statusOptions = [], typeOptions = [] }) {
+  const statusSelect = statusOptions.length > 0
+    ? `
+      <label>Status
+        <select name="status">
+          ${option('', 'All statuses', state.status)}
+          ${statusOptions.map((item) => option(item.value, item.label, state.status)).join('')}
+        </select>
+      </label>
+    `
+    : '';
+  const typeSelect = typeOptions.length > 0
+    ? `
+      <label>Type
+        <select name="type">
+          ${option('', 'All types', state.type)}
+          ${typeOptions.map((item) => option(item.value, item.label, state.type)).join('')}
+        </select>
+      </label>
+    `
+    : '';
+
+  return `
+    <form class="table-controls" method="get" action="${escapeHtml(action)}">
+      <label>Search
+        <input name="q" type="search" value="${escapeHtml(state.q)}" placeholder="Search by title, office, or requester">
+      </label>
+      ${statusSelect}
+      ${typeSelect}
+      <div class="table-control-actions">
+        <button type="submit">Apply</button>
+        <a class="button button-secondary" href="${escapeHtml(action)}">Clear</a>
+      </div>
+    </form>
+  `;
+}
+
+function pageHref(basePath, state, page) {
+  const params = new URLSearchParams();
+  if (state.q) params.set('q', state.q);
+  if (state.status) params.set('status', state.status);
+  if (state.type) params.set('type', state.type);
+  params.set('page', String(page));
+  return `${basePath}?${params.toString()}`;
+}
+
+function renderPagination({ state, total, pageSize = LIST_PAGE_SIZE }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(state.page, pageCount);
+  const previous = page > 1
+    ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page - 1))}">Previous</a>`
+    : '<span class="button button-disabled" aria-disabled="true">Previous</span>';
+  const next = page < pageCount
+    ? `<a class="button button-secondary" href="${escapeHtml(pageHref(state.basePath, state, page + 1))}">Next</a>`
+    : '<span class="button button-disabled" aria-disabled="true">Next</span>';
+
+  return `
+    <nav class="pagination" aria-label="Pagination">
+      ${previous}
+      <span>Page ${escapeHtml(page)} of ${escapeHtml(pageCount)}</span>
+      ${next}
+    </nav>
+  `;
+}
+
 function renderAdminDashboard(user, counts, options = {}) {
   const safeCounts = {
     pendingAccountRequests: Number(counts.pending_account_requests || 0),
@@ -256,15 +356,30 @@ function renderOfficeSubmissionRows(rows) {
   `;
 }
 
-function renderOfficeDashboard(user, submissions) {
+function renderOfficeDashboard(user, submissions, options = {}) {
+  const state = options.state || { page: 1, q: '', status: '', type: '', basePath: '/admin' };
+  const total = Number.isInteger(options.total) ? options.total : submissions.length;
+
   return pageLayout({
-    title: 'Office dashboard',
-    activePath: '/admin',
+    title: options.title || 'Office dashboard',
+    activePath: options.activePath || '/admin',
     user,
+    notice: options.notice,
     body: `
       <section>
-        <h2>My submissions</h2>
+        <h2>${escapeHtml(options.heading || 'My submissions')}</h2>
+        ${renderFilterBar({
+          action: options.action || '/admin',
+          state,
+          statusOptions: [
+            { value: 'pending_review', label: 'Pending review' },
+            { value: 'needs_revision', label: 'Needs revision' },
+            { value: 'published', label: 'Published' },
+            { value: 'rejected', label: 'Rejected' },
+          ],
+        })}
         ${renderOfficeSubmissionRows(submissions)}
+        ${renderPagination({ state, total })}
       </section>
       <p><a class="button" href="/admin/content/new">Submit new content</a></p>
     `,
@@ -307,9 +422,28 @@ function renderAccountRequestRows(rows, user) {
       <td>${escapeHtml(request.requested_office_name || '')}</td>
       <td>${escapeHtml(request.position)}</td>
       <td>${escapeHtml(request.status)}</td>
-      <td>
+      <td><a class="button" href="#request-${escapeHtml(request.id)}">Review</a></td>
+    </tr>
+  `).join('');
+
+  const modals = rows.map((request) => `
+    <section class="action-modal" id="request-${escapeHtml(request.id)}" aria-labelledby="request-${escapeHtml(request.id)}-title">
+      <a class="modal-backdrop" href="#main-content" aria-label="Close review panel"></a>
+      <div class="modal-panel" role="dialog" aria-modal="true">
+        <div class="modal-heading">
+          <h2 id="request-${escapeHtml(request.id)}-title">${escapeHtml(request.full_name)}</h2>
+          <a class="button button-secondary" href="#main-content">Close</a>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Email</dt><dd>${escapeHtml(request.email)}</dd></div>
+          <div><dt>Office</dt><dd>${escapeHtml(request.requested_office_name || '')}</dd></div>
+          <div><dt>Position</dt><dd>${escapeHtml(request.position)}</dd></div>
+          <div><dt>Status</dt><dd>${escapeHtml(request.status)}</dd></div>
+        </dl>
+        <div class="modal-actions">
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/approve">
           ${csrfInput(user)}
+          <h3>Approve</h3>
           <input name="office_id" type="number" min="1" placeholder="Office ID" required>
           <select name="role">
             <option value="office_user">Office user</option>
@@ -320,32 +454,38 @@ function renderAccountRequestRows(rows, user) {
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/reject">
           ${csrfInput(user)}
+          <h3>Reject</h3>
           <textarea name="admin_note" maxlength="${FIELD_LIMITS.admin_note}" placeholder="Admin note" required></textarea>
           <button class="button-danger" type="submit">Reject</button>
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/needs-info">
           ${csrfInput(user)}
+          <h3>Needs info</h3>
           <textarea name="admin_note" maxlength="${FIELD_LIMITS.admin_note}" placeholder="Admin note" required></textarea>
           <button type="submit">Needs info</button>
         </form>
-      </td>
-    </tr>
+        </div>
+      </div>
+    </section>
   `).join('');
 
   return `
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Office</th>
-          <th>Position</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>${body}</tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Office</th>
+            <th>Position</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${modals}
   `;
 }
 
@@ -403,27 +543,30 @@ function renderContentReviewRows(rows) {
   `).join('');
 
   return `
-    <table>
-      <thead>
-        <tr>
-          <th>Title</th>
-          <th>Type</th>
-          <th>Office</th>
-          <th>Submitted</th>
-        </tr>
-      </thead>
-      <tbody>${body}</tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Type</th>
+            <th>Office</th>
+            <th>Submitted</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
   `;
 }
 
-function renderContentReviewDetail(review, user) {
+function renderContentReviewDetail(review, user, options = {}) {
   const payload = JSON.stringify(review.structured_payload || {}, null, 2);
 
   return pageLayout({
     title: 'Content review',
     activePath: '/admin/reviews',
     user,
+    notice: options.notice,
     body: `
       <p><strong>${escapeHtml(review.title)}</strong></p>
       <p>${escapeHtml(CONTENT_TYPE_LABELS[review.content_type] || review.content_type)} from ${escapeHtml(review.office_name || '')}</p>
@@ -764,7 +907,7 @@ async function requireOfficeUser(context) {
   return user;
 }
 
-async function handleDashboard({ response, pool, user, notice = '' }) {
+async function handleDashboard({ response, pool, user, url, notice = '' }) {
   if (user.role === 'admin') {
     const result = await pool.query(
       `
@@ -792,52 +935,135 @@ async function handleDashboard({ response, pool, user, notice = '' }) {
   }
 
   if (user.role === 'office_user') {
-    const officeId = Number(user.office_id);
-    if (!Number.isInteger(officeId) || officeId < 1) {
-      sendHtml(response, 200, renderOfficeDashboard(user, []));
-      return;
-    }
-
-    const result = await pool.query(
-      `
-        SELECT cv.id,
-               cv.title,
-               ci.content_type,
-               cv.status,
-               cv.submitted_at,
-               latest_note.note AS latest_admin_note
-        FROM content_versions cv
-        JOIN content_items ci ON ci.id = cv.content_item_id
-        LEFT JOIN LATERAL (
-          SELECT rn.note
-          FROM review_notes rn
-          WHERE rn.content_version_id = cv.id
-          ORDER BY rn.created_at DESC, rn.id DESC
-          LIMIT 1
-        ) latest_note ON true
-        WHERE ci.office_id = $1
-          AND cv.submitted_by = $2
-        ORDER BY cv.submitted_at DESC NULLS LAST, cv.id DESC
-        LIMIT 25
-      `,
-      [officeId, user.id],
-    );
-
-    sendHtml(response, 200, renderOfficeDashboard(user, result.rows));
+    await handleOfficeSubmissionsIndex({
+      response,
+      pool,
+      user,
+      url,
+      notice,
+      title: 'Office dashboard',
+      heading: 'My submissions',
+      activePath: '/admin',
+      basePath: '/admin',
+    });
     return;
   }
 
   renderForbidden(response, user);
 }
 
-async function handleAccountRequestsIndex({ response, pool, user }) {
+async function handleOfficeSubmissionsIndex({
+  response,
+  pool,
+  user,
+  url,
+  notice = '',
+  title = 'Submission history',
+  heading = 'Submission history',
+  activePath = '/admin/submissions',
+  basePath = '/admin/submissions',
+}) {
+  const state = listStateFromUrl(url || new URL(`http://localhost${basePath}`), { basePath });
+  const officeId = Number(user.office_id);
+  if (!Number.isInteger(officeId) || officeId < 1) {
+    sendHtml(response, 200, renderOfficeDashboard(user, [], {
+      state,
+      total: 0,
+      notice,
+      title,
+      heading,
+      activePath,
+      action: basePath,
+    }));
+    return;
+  }
+
+  const filters = [];
+  const params = [officeId, user.id];
+  if (state.status) {
+    params.push(state.status);
+    filters.push(`cv.status = $${params.length}`);
+  }
+  if (state.q) {
+    params.push(likePattern(state.q));
+    filters.push(`(cv.title ILIKE $${params.length} OR ci.content_type ILIKE $${params.length})`);
+  }
+  params.push(LIST_PAGE_SIZE, (state.page - 1) * LIST_PAGE_SIZE);
+  const limitParam = params.length - 1;
+  const offsetParam = params.length;
+  const extraWhere = filters.length > 0 ? `AND ${filters.join(' AND ')}` : '';
   const result = await pool.query(
     `
-      SELECT id, full_name, email, requested_office_name, position, status, created_at
-      FROM account_requests
-      ORDER BY created_at DESC, id DESC
+      SELECT cv.id,
+             cv.title,
+             ci.content_type,
+             cv.status,
+             cv.submitted_at,
+             latest_note.note AS latest_admin_note,
+             count(*) OVER() AS total_count
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      LEFT JOIN LATERAL (
+        SELECT rn.note
+        FROM review_notes rn
+        WHERE rn.content_version_id = cv.id
+        ORDER BY rn.created_at DESC, rn.id DESC
+        LIMIT 1
+      ) latest_note ON true
+      WHERE ci.office_id = $1
+        AND cv.submitted_by = $2
+        ${extraWhere}
+      ORDER BY cv.submitted_at DESC NULLS LAST, cv.id DESC
+      LIMIT $${limitParam} OFFSET $${offsetParam}
     `,
+    params,
   );
+
+  sendHtml(response, 200, renderOfficeDashboard(user, result.rows, {
+    state,
+    total: totalFromRows(result.rows),
+    notice,
+    title,
+    heading,
+    activePath,
+    action: basePath,
+  }));
+}
+
+async function handleAccountRequestsIndex({ response, pool, user, url }) {
+  const state = listStateFromUrl(url || new URL('http://localhost/admin/account-requests'), {
+    basePath: '/admin/account-requests',
+  });
+  const filters = [];
+  const params = [];
+  if (state.status) {
+    params.push(state.status);
+    filters.push(`status = $${params.length}`);
+  }
+  if (state.q) {
+    params.push(likePattern(state.q));
+    filters.push(`(full_name ILIKE $${params.length} OR email ILIKE $${params.length} OR requested_office_name ILIKE $${params.length})`);
+  }
+  params.push(LIST_PAGE_SIZE, (state.page - 1) * LIST_PAGE_SIZE);
+  const limitParam = params.length - 1;
+  const offsetParam = params.length;
+  const where = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+  const result = await pool.query(
+    `
+      SELECT id, full_name, email, requested_office_name, position, status, created_at,
+             count(*) OVER() AS total_count
+      FROM account_requests
+      ${where}
+      ORDER BY created_at DESC, id DESC
+      LIMIT $${limitParam} OFFSET $${offsetParam}
+    `,
+    params,
+  );
+  const notice = noticeText(state.notice, {
+    approved: 'Account request approved.',
+    rejected: 'Account request rejected.',
+    needs_info: 'Account request marked as needs info.',
+  });
 
   sendHtml(
     response,
@@ -846,7 +1072,21 @@ async function handleAccountRequestsIndex({ response, pool, user }) {
       title: 'Account requests',
       activePath: '/admin/account-requests',
       user,
-      body: renderAccountRequestRows(result.rows, user),
+      notice,
+      body: `
+        ${renderFilterBar({
+          action: '/admin/account-requests',
+          state,
+          statusOptions: [
+            { value: 'pending', label: 'Pending' },
+            { value: 'approved', label: 'Approved' },
+            { value: 'rejected', label: 'Rejected' },
+            { value: 'needs_info', label: 'Needs info' },
+          ],
+        })}
+        ${renderAccountRequestRows(result.rows, user)}
+        ${renderPagination({ state, total: totalFromRows(result.rows) })}
+      `,
     }),
   );
 }
@@ -1126,20 +1366,44 @@ async function handleAttachmentMetadataCreate({ request, response, pool, user })
   sendJson(response, 201, { id: result.rows[0].id });
 }
 
-async function handleContentReviewsIndex({ response, pool, user }) {
+async function handleContentReviewsIndex({ response, pool, user, url }) {
+  const state = listStateFromUrl(url || new URL('http://localhost/admin/reviews'), {
+    basePath: '/admin/reviews',
+  });
+  const filters = ["cv.status = 'pending_review'"];
+  const params = [];
+  if (state.type) {
+    params.push(state.type);
+    filters.push(`ci.content_type = $${params.length}`);
+  }
+  if (state.q) {
+    params.push(likePattern(state.q));
+    filters.push(`(cv.title ILIKE $${params.length} OR o.name ILIKE $${params.length})`);
+  }
+  params.push(LIST_PAGE_SIZE, (state.page - 1) * LIST_PAGE_SIZE);
+  const limitParam = params.length - 1;
+  const offsetParam = params.length;
+  const notice = noticeText(state.notice, {
+    approved: 'Content approved and published.',
+    rejected: 'Content rejected.',
+    needs_revision: 'Content returned for revision.',
+  });
   const result = await pool.query(
     `
       SELECT cv.id,
              cv.title,
              ci.content_type,
              o.name AS office_name,
-             cv.submitted_at
+             cv.submitted_at,
+             count(*) OVER() AS total_count
       FROM content_versions cv
       JOIN content_items ci ON ci.id = cv.content_item_id
       LEFT JOIN offices o ON o.id = ci.office_id
-      WHERE cv.status = 'pending_review'
+      WHERE ${filters.join(' AND ')}
       ORDER BY cv.submitted_at ASC NULLS LAST, cv.id ASC
+      LIMIT $${limitParam} OFFSET $${offsetParam}
     `,
+    params,
   );
 
   sendHtml(
@@ -1149,12 +1413,24 @@ async function handleContentReviewsIndex({ response, pool, user }) {
       title: 'Content reviews',
       activePath: '/admin/reviews',
       user,
-      body: renderContentReviewRows(result.rows),
+      notice,
+      body: `
+        ${renderFilterBar({
+          action: '/admin/reviews',
+          state,
+          typeOptions: [...VALID_CONTENT_TYPES].map((type) => ({
+            value: type,
+            label: CONTENT_TYPE_LABELS[type],
+          })),
+        })}
+        ${renderContentReviewRows(result.rows)}
+        ${renderPagination({ state, total: totalFromRows(result.rows) })}
+      `,
     }),
   );
 }
 
-async function handleContentReviewDetail({ response, pool, user, id }) {
+async function handleContentReviewDetail({ response, pool, user, id, url }) {
   const result = await pool.query(
     `
       SELECT cv.id,
@@ -1181,7 +1457,12 @@ async function handleContentReviewDetail({ response, pool, user, id }) {
     return;
   }
 
-  sendHtml(response, 200, renderContentReviewDetail(review, user));
+  const notice = noticeText(clean(url?.searchParams?.get('notice')), {
+    rejected: 'Content rejected.',
+    needs_revision: 'Content returned for revision.',
+  });
+
+  sendHtml(response, 200, renderContentReviewDetail(review, user, { notice }));
 }
 
 async function lockContentVersion(client, id) {
@@ -1216,8 +1497,9 @@ async function invalidatePublishedCache(redis) {
   await redis.del('published:faqs');
 }
 
-async function handleCacheRefresh({ response, redis }) {
+async function handleCacheRefresh({ response, pool, redis }) {
   await invalidatePublishedCache(redis);
+  await warmPublishedContentCache({ pool, redis });
   redirect(response, '/admin?cache_refreshed=1');
 }
 
@@ -1252,7 +1534,8 @@ async function handleContentApprove({ response, pool, redis, user, id }) {
   });
 
   await invalidatePublishedCache(redis);
-  redirect(response, '/admin/reviews');
+  await warmPublishedContentCache({ pool, redis });
+  redirect(response, '/admin/reviews?notice=approved');
 }
 
 async function handleContentReviewStatus({ request, response, pool, user, id, status, csrfProtection }) {
@@ -1298,7 +1581,7 @@ async function handleContentReviewStatus({ request, response, pool, user, id, st
     );
   });
 
-  redirect(response, `/admin/reviews/${id}`);
+  redirect(response, `/admin/reviews/${id}?notice=${status}`);
 }
 
 function parseRequestAction(pathname) {
@@ -1410,7 +1693,7 @@ async function handleApprove({ request, response, pool, user, id, csrfProtection
     );
   });
 
-  redirect(response, '/admin/account-requests');
+  redirect(response, '/admin/account-requests?notice=approved');
 }
 
 async function handleReviewStatus({ request, response, pool, user, id, status, csrfProtection }) {
@@ -1444,7 +1727,7 @@ async function handleReviewStatus({ request, response, pool, user, id, status, c
     [id, status, user.id, adminNote],
   );
 
-  redirect(response, '/admin/account-requests');
+  redirect(response, `/admin/account-requests?notice=${status}`);
 }
 
 function createAdminRouteHandler(options = {}) {
@@ -1525,7 +1808,7 @@ function createAdminRouteHandler(options = {}) {
       const notice = url.searchParams.get('cache_refreshed') === '1'
         ? 'Published chatbot cache refreshed.'
         : '';
-      await handleDashboard({ response, pool: services.pool, user, notice });
+      await handleDashboard({ response, pool: services.pool, user, url, notice });
       return true;
     }
 
@@ -1544,6 +1827,7 @@ function createAdminRouteHandler(options = {}) {
 
       await handleCacheRefresh({
         response,
+        pool: services.pool,
         redis: services.redis,
       });
       return true;
@@ -1558,7 +1842,25 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
 
-      await handleAccountRequestsIndex({ response, pool: services.pool, user });
+      await handleAccountRequestsIndex({ response, pool: services.pool, user, url });
+      return true;
+    }
+
+    if (pathname === '/admin/submissions') {
+      const user = await requireOfficeUser({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      await handleOfficeSubmissionsIndex({
+        response,
+        pool: services.pool,
+        user,
+        url,
+      });
       return true;
     }
 
@@ -1629,7 +1931,7 @@ function createAdminRouteHandler(options = {}) {
         return true;
       }
 
-      await handleContentReviewsIndex({ response, pool: services.pool, user });
+      await handleContentReviewsIndex({ response, pool: services.pool, user, url });
       return true;
     }
 
@@ -1648,6 +1950,7 @@ function createAdminRouteHandler(options = {}) {
         pool: services.pool,
         user,
         id: contentReviewId,
+        url,
       });
       return true;
     }

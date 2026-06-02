@@ -285,6 +285,147 @@ function pageLayout({ title, body, user = null, activePath = '', notice = '' }) 
       background: var(--aico-red);
     }
 
+    .button-secondary {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .button-disabled {
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: #f4f7f5;
+      cursor: not-allowed;
+    }
+
+    .table-controls {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(170px, 220px) auto;
+      gap: 12px;
+      align-items: end;
+      margin: 0 0 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f8fbf9;
+    }
+
+    .table-control-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+
+    .table-scroll table {
+      min-width: 760px;
+    }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .pagination span {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .action-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      padding: 20px;
+    }
+
+    .action-modal:target {
+      display: grid;
+      place-items: center;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgb(0 0 0 / 48%);
+    }
+
+    .modal-panel {
+      position: relative;
+      z-index: 1;
+      width: min(920px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 18px;
+      box-shadow: 0 18px 54px rgb(0 0 0 / 26%);
+    }
+
+    .modal-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-heading h2,
+    .modal-actions h3 {
+      margin: 0;
+    }
+
+    .detail-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 16px;
+    }
+
+    .detail-list div {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #f8fbf9;
+    }
+
+    .detail-list dt {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .detail-list dd {
+      margin: 2px 0 0;
+    }
+
+    .modal-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .modal-actions form {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: #fff;
+    }
+
     @media (max-width: 760px) {
       .app-shell {
         grid-template-columns: 1fr;
@@ -308,6 +449,18 @@ function pageLayout({ title, body, user = null, activePath = '', notice = '' }) 
 
       .content {
         padding: 16px;
+      }
+
+      .table-controls,
+      .detail-list,
+      .modal-actions {
+        grid-template-columns: 1fr;
+      }
+
+      .table-control-actions,
+      .pagination {
+        justify-content: flex-start;
+        flex-wrap: wrap;
       }
     }
   </style>

@@ -252,4 +252,4 @@ It uses the current shell environment variables, so make sure `DATABASE_URL` and
 
 - If tests fail locally, use `npm test`.
 - If webhook verification fails, check `MESSENGER_VERIFY_TOKEN`.
-- If Redis cache is stale, admin publication invalidates `published:services` and `published:faqs`.
+- If Redis cache is stale, admin publication and the dashboard refresh action invalidate and warm `published:services` and `published:faqs`.

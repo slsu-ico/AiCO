@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   loadPublishedFaqs,
   loadPublishedServices,
+  warmPublishedContentCache,
 } = require('../src/publishedContentRepository');
 
 class FakeRedis {
@@ -71,7 +72,7 @@ test('loadPublishedServices queries published active service payloads and caches
   assert.deepEqual(redis.setCalls, [{
     key: 'published:services',
     value: JSON.stringify([servicePayload]),
-    options: { expiration: { type: 'EX', value: 600 } },
+    options: undefined,
   }]);
 });
 
@@ -96,6 +97,44 @@ test('loadPublishedFaqs queries only published active FAQ payloads and caches th
   assert.deepEqual(redis.setCalls, [{
     key: 'published:faqs',
     value: JSON.stringify([faqPayload]),
-    options: { expiration: { type: 'EX', value: 600 } },
+    options: undefined,
   }]);
+});
+
+test('warmPublishedContentCache refreshes service and FAQ caches from PostgreSQL', async () => {
+  const redis = new FakeRedis([
+    ['published:services', JSON.stringify([{ id: 'stale-service' }])],
+    ['published:faqs', JSON.stringify([{ question: 'stale faq' }])],
+  ]);
+  const servicePayload = { id: 'current-service', service_name: 'Current Service' };
+  const faqPayload = { question: 'Current FAQ', answer: 'Use the portal.' };
+  const pool = {
+    calls: [],
+    async query(text, params = []) {
+      this.calls.push({ text, params });
+      if (params[0] === 'citizens_charter_service') return { rows: [{ structured_payload: servicePayload }] };
+      if (params[0] === 'faq') return { rows: [{ structured_payload: faqPayload }] };
+      throw new Error(`Unexpected params: ${params}`);
+    },
+  };
+
+  const warmed = await warmPublishedContentCache({ pool, redis });
+
+  assert.deepEqual(warmed, {
+    services: [servicePayload],
+    faqs: [faqPayload],
+  });
+  assert.deepEqual(pool.calls.map((call) => call.params), [['citizens_charter_service'], ['faq']]);
+  assert.deepEqual(redis.setCalls, [
+    {
+      key: 'published:services',
+      value: JSON.stringify([servicePayload]),
+      options: undefined,
+    },
+    {
+      key: 'published:faqs',
+      value: JSON.stringify([faqPayload]),
+      options: undefined,
+    },
+  ]);
 });

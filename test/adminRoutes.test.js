@@ -201,7 +201,7 @@ test('hardened forms include CSRF tokens and reject forged admin POSTs', async (
   const redis = new FakeRedis();
   await redis.set('published:services', 'cached services');
   const cookie = await adminCookie(redis);
-  const pool = createFakePool((text) => {
+  const pool = createFakePool((text, params = []) => {
     if (sqlIncludes(text, 'pending_account_requests')
       && sqlIncludes(text, 'pending_content_reviews')
       && sqlIncludes(text, 'published_records')) {
@@ -212,6 +212,13 @@ test('hardened forms include CSRF tokens and reject forged admin POSTs', async (
           published_records: '1',
         }],
       };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci')
+      && params[0] === 'citizens_charter_service') {
+      return { rows: [{ structured_payload: { id: 'warmed-service' } }] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'faq') {
+      return { rows: [{ structured_payload: { question: 'Warmed FAQ', answer: 'Cached.' } }] };
     }
     throw new Error('forged cache refresh should not query the database');
   });
@@ -248,7 +255,7 @@ test('hardened forms include CSRF tokens and reject forged admin POSTs', async (
 
     assert.equal(legitimate.status, 303);
     assert.equal(legitimate.headers.get('location'), '/admin?cache_refreshed=1');
-    assert.equal(await redis.get('published:services'), null);
+    assert.equal(await redis.get('published:services'), JSON.stringify([{ id: 'warmed-service' }]));
   } finally {
     await close(server);
   }
@@ -536,8 +543,15 @@ test('admin can refresh published caches from the dashboard action', async () =>
   await redis.set('published:services', 'cached services');
   await redis.set('published:faqs', 'cached faqs');
   const cookie = await adminCookie(redis);
-  const pool = createFakePool(() => {
-    throw new Error('cache refresh should not query the database');
+  const pool = createFakePool((text, params = []) => {
+    if (sqlIncludes(text, 'FROM content_items ci')
+      && params[0] === 'citizens_charter_service') {
+      return { rows: [{ structured_payload: { id: 'warmed-service' } }] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'faq') {
+      return { rows: [{ structured_payload: { question: 'Warmed FAQ', answer: 'Cached.' } }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
   });
   const server = createAdminServer({ pool, redis });
   const baseUrl = await listen(server);
@@ -551,8 +565,8 @@ test('admin can refresh published caches from the dashboard action', async () =>
 
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), '/admin?cache_refreshed=1');
-    assert.equal(await redis.get('published:services'), null);
-    assert.equal(await redis.get('published:faqs'), null);
+    assert.equal(await redis.get('published:services'), JSON.stringify([{ id: 'warmed-service' }]));
+    assert.equal(await redis.get('published:faqs'), JSON.stringify([{ question: 'Warmed FAQ', answer: 'Cached.' }]));
     assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
   } finally {
     await close(server);
@@ -650,7 +664,7 @@ test('office dashboard shows submissions with status and latest admin note', asy
     if (sqlIncludes(text, 'FROM content_versions cv')
       && sqlIncludes(text, 'latest_note.note AS latest_admin_note')
       && sqlIncludes(text, 'cv.submitted_by = $2')) {
-      assert.deepEqual(params, [7, 22]);
+      assert.deepEqual(params, [7, 22, 20, 0]);
       return {
         rows: [{
           id: 901,
@@ -689,6 +703,95 @@ test('office dashboard shows submissions with status and latest admin note', asy
   }
 });
 
+test('office dashboard paginates and filters submission history', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 22, office_id: 7 });
+  let queryParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv')
+      && sqlIncludes(text, 'latest_note.note AS latest_admin_note')
+      && sqlIncludes(text, 'cv.submitted_by = $2')) {
+      queryParams = params;
+      assert.ok(sqlIncludes(text, 'count(*) OVER() AS total_count'));
+      assert.ok(sqlIncludes(text, 'LIMIT $5 OFFSET $6'));
+      return {
+        rows: [{
+          id: 901,
+          title: 'Scholarship FAQ',
+          content_type: 'faq',
+          status: 'needs_revision',
+          submitted_at: '2026-05-12T02:00:00.000Z',
+          latest_admin_note: 'Please add the eligibility period.',
+          total_count: '45',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin?q=Scholarship&status=needs_revision&page=2`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(queryParams, [7, 22, 'needs_revision', '%Scholarship%', 20, 20]);
+    assert.match(html, /name="q" type="search" value="Scholarship"/);
+    assert.match(html, /value="needs_revision" selected/);
+    assert.match(html, /Page 2 of 3/);
+    assert.match(html, /href="\/admin\?q=Scholarship&amp;status=needs_revision&amp;page=1"/);
+    assert.match(html, /href="\/admin\?q=Scholarship&amp;status=needs_revision&amp;page=3"/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('office submission history route uses the same paginated filters', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 22, office_id: 7 });
+  let queryParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv')
+      && sqlIncludes(text, 'latest_note.note AS latest_admin_note')
+      && sqlIncludes(text, 'cv.submitted_by = $2')) {
+      queryParams = params;
+      assert.ok(sqlIncludes(text, 'LIMIT $5 OFFSET $6'));
+      return {
+        rows: [{
+          id: 901,
+          title: 'Published FAQ',
+          content_type: 'faq',
+          status: 'published',
+          submitted_at: '2026-05-12T02:00:00.000Z',
+          latest_admin_note: '',
+          total_count: '1',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/submissions?q=FAQ&status=published`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(queryParams, [7, 22, 'published', '%FAQ%', 20, 0]);
+    assert.match(html, /Submission history/);
+    assert.match(html, /Published FAQ/);
+    assert.match(html, /aria-current="page" href="\/admin\/submissions"/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('redirects unauthenticated admin requests to login', async () => {
   const server = createAdminServer({ pool: createFakePool(() => ({ rows: [] })) });
   const baseUrl = await listen(server);
@@ -698,6 +801,53 @@ test('redirects unauthenticated admin requests to login', async () => {
 
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), '/login');
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin account requests are paginated, filterable, and use modal review actions', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  let queryParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM account_requests')) {
+      queryParams = params;
+      assert.ok(sqlIncludes(text, 'count(*) OVER() AS total_count'));
+      assert.ok(sqlIncludes(text, 'LIMIT $3 OFFSET $4'));
+      return {
+        rows: [{
+          id: 42,
+          full_name: 'Maria Santos',
+          email: 'maria@slsu.edu.ph',
+          requested_office_name: 'Registrar',
+          position: 'Records Officer',
+          status: 'pending',
+          created_at: '2026-05-12T02:00:00.000Z',
+          total_count: '28',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/account-requests?q=Maria&status=pending&page=2`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(queryParams, ['pending', '%Maria%', 20, 20]);
+    assert.match(html, /name="q" type="search" value="Maria"/);
+    assert.match(html, /value="pending" selected/);
+    assert.match(html, /href="#request-42"/);
+    assert.match(html, /class="action-modal" id="request-42"/);
+    assert.match(html, /action="\/admin\/account-requests\/42\/approve"/);
+    assert.match(html, /Page 2 of 2/);
+    assert.doesNotMatch(html, /<td>\s*<form method="post" action="\/admin\/account-requests\/42\/approve"/);
   } finally {
     await close(server);
   }
@@ -750,7 +900,7 @@ test('admin approval creates an active user from an account request', async () =
     });
 
     assert.equal(response.status, 303);
-    assert.equal(response.headers.get('location'), '/admin/account-requests');
+    assert.equal(response.headers.get('location'), '/admin/account-requests?notice=approved');
     assert.equal(insertedUserParams[0], 3);
     assert.equal(insertedUserParams[1], 'juan@slsu.edu.ph');
     assert.match(insertedUserParams[2], /^scrypt:v1:N=16384,r=8,p=1,keylen=64:/);
@@ -759,6 +909,31 @@ test('admin approval creates an active user from an account request', async () =
     assert.equal(insertedUserParams[4], 'office_user');
     assert.equal(insertedUserParams[5], true);
     assert.deepEqual(approvedParams, [42, 10, '', 3]);
+  } finally {
+    await close(server);
+  }
+});
+
+test('account request action notices are shown after redirects', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'FROM account_requests')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/account-requests?notice=rejected`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Account request rejected/);
   } finally {
     await close(server);
   }
@@ -1303,7 +1478,49 @@ test('admin can view pending content review list and detail', async () => {
   }
 });
 
-test('admin approval publishes content and invalidates published caches', async () => {
+test('admin content reviews are paginated and searchable by title or office', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  let queryParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, "cv.status = 'pending_review'")) {
+      queryParams = params;
+      assert.ok(sqlIncludes(text, 'count(*) OVER() AS total_count'));
+      assert.ok(sqlIncludes(text, 'LIMIT $3 OFFSET $4'));
+      return {
+        rows: [{
+          id: 55,
+          title: 'Scholarship FAQ',
+          content_type: 'faq',
+          office_name: 'International Office',
+          submitted_at: '2026-05-12T02:00:00.000Z',
+          total_count: '41',
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews?q=Scholarship&type=faq&page=2`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(queryParams, ['faq', '%Scholarship%', 20, 20]);
+    assert.match(html, /name="q" type="search" value="Scholarship"/);
+    assert.match(html, /value="faq" selected/);
+    assert.match(html, /Page 2 of 3/);
+    assert.match(html, /href="\/admin\/reviews\?q=Scholarship&amp;type=faq&amp;page=1"/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin approval publishes content, invalidates caches, and warms published records', async () => {
   const redis = new FakeRedis();
   await redis.set('published:services', 'cached services');
   await redis.set('published:faqs', 'cached faqs');
@@ -1330,6 +1547,13 @@ test('admin approval publishes content and invalidates published caches', async 
       itemUpdateParams = params;
       return { rows: [{ id: 90 }] };
     }
+    if (sqlIncludes(text, 'FROM content_items ci')
+      && params[0] === 'citizens_charter_service') {
+      return { rows: [{ structured_payload: { id: 'fresh-service' } }] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'faq') {
+      return { rows: [{ structured_payload: { question: 'Fresh FAQ', answer: 'Published.' } }] };
+    }
     throw new Error(`Unexpected SQL: ${text}`);
   });
   const server = createAdminServer({ pool, redis });
@@ -1343,12 +1567,37 @@ test('admin approval publishes content and invalidates published caches', async 
     });
 
     assert.equal(response.status, 303);
-    assert.equal(response.headers.get('location'), '/admin/reviews');
+    assert.equal(response.headers.get('location'), '/admin/reviews?notice=approved');
     assert.deepEqual(versionUpdateParams, [55, 10]);
     assert.deepEqual(itemUpdateParams, [90, 55]);
-    assert.equal(await redis.get('published:services'), null);
-    assert.equal(await redis.get('published:faqs'), null);
+    assert.equal(await redis.get('published:services'), JSON.stringify([{ id: 'fresh-service' }]));
+    assert.equal(await redis.get('published:faqs'), JSON.stringify([{ question: 'Fresh FAQ', answer: 'Published.' }]));
     assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
+  } finally {
+    await close(server);
+  }
+});
+
+test('content review action notices are shown after redirects', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, "cv.status = 'pending_review'")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews?notice=approved`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Content approved and published/);
   } finally {
     await close(server);
   }
@@ -1424,7 +1673,7 @@ test('needs-revision review action stores reviewer note', async () => {
     });
 
     assert.equal(response.status, 303);
-    assert.equal(response.headers.get('location'), '/admin/reviews/55');
+    assert.equal(response.headers.get('location'), '/admin/reviews/55?notice=needs_revision');
     assert.deepEqual(versionUpdateParams, [55, 'needs_revision', 10]);
     assert.deepEqual(noteParams, [55, 10, 'needs_revision', 'Please add processing time and requirements.']);
   } finally {

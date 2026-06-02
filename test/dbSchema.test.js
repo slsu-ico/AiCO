@@ -133,6 +133,27 @@ test('schema defines required lookup indexes', () => {
   assert.match(schema, /CREATE INDEX IF NOT EXISTS idx_content_items_office_type\s+ON content_items\(office_id,\s*content_type\)/i);
   assert.match(schema, /CREATE INDEX IF NOT EXISTS idx_content_versions_status\s+ON content_versions\(status\)/i);
   assert.match(schema, /CREATE INDEX IF NOT EXISTS idx_content_versions_item_status\s+ON content_versions\(content_item_id,\s*status\)/i);
+  assert.match(schema, /CREATE INDEX IF NOT EXISTS idx_content_versions_published\s+ON content_versions\(published_at\s+DESC,\s*id\s+DESC\)\s+WHERE status = 'published'/i);
+});
+
+test('createPool maps app config to bounded pg Pool options', () => {
+  const { poolOptionsFromConfig } = require('../src/db/postgres');
+
+  assert.deepEqual(
+    poolOptionsFromConfig({
+      databaseUrl: 'postgres://example/db',
+      redisUrl: 'redis://cache',
+      sessionSecret: 'secret',
+    }),
+    {
+      connectionString: 'postgres://example/db',
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    },
+  );
+
+  assert.equal(poolOptionsFromConfig({ databaseUrl: 'postgres://example/db', max: 4 }).max, 4);
 });
 
 test('withTransaction commits successful callbacks and releases the client', async () => {

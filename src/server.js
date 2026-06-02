@@ -47,7 +47,6 @@ function extractIncomingText(event) {
 
 function createRequestHandler(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
-  const sessions = new Map();
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
 
   async function getChatbotServices() {
@@ -59,16 +58,13 @@ function createRequestHandler(options = {}) {
 
   async function getBotSession(senderId) {
     if (!senderId) return null;
-    if (!options.redis) return sessions.get(senderId) || null;
+    if (!options.redis) return null;
     return getJson(options.redis, `bot_session:${senderId}`);
   }
 
   async function setBotSession(senderId, session) {
     if (!senderId) return;
-    if (!options.redis) {
-      sessions.set(senderId, session);
-      return;
-    }
+    if (!options.redis) return;
 
     await setJson(options.redis, `bot_session:${senderId}`, session, { ttlSeconds: BOT_SESSION_TTL_SECONDS });
   }

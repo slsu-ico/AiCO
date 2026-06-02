@@ -92,11 +92,11 @@ Set `BOOTSTRAP_ADMIN_PASSWORD` to a strong temporary value before running `npm r
 
 ## Chatbot Published Content
 
-The chatbot reads only active, published records from PostgreSQL through `src/publishedContentRepository.js`. Published services and FAQs are cached in Redis under `published:services` and `published:faqs` for 10 minutes. Admin approval invalidates those Redis keys so the next chatbot request can load the newly published content. Pending review, rejected, and needs revision records never affect live chatbot answers.
+The chatbot reads only active, published records from PostgreSQL through `src/publishedContentRepository.js`. Published services and FAQs are cached in Redis under `published:services` and `published:faqs`. Admin approval and the dashboard refresh action invalidate and immediately warm those Redis keys so the next chatbot request can use the refreshed cache. Pending review, rejected, and needs revision records never affect live chatbot answers.
 
 ### Live cloud updates
 
-To update live chatbot content in the cloud, publish content through the admin portal on the deployed app or edit the production Postgres tables directly. After publication, the bot reloads fresh content from the database once the cache expires or when admin invalidation triggers a refresh.
+To update live chatbot content in the cloud, publish content through the admin portal on the deployed app or edit the production Postgres tables directly. After publication, the admin flow reloads fresh content into Redis. If production data is edited directly, use the admin dashboard refresh action to warm the published cache.
 
 ## Important Paths
 

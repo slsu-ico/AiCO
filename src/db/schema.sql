@@ -109,6 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email_active ON users(email) WHERE active =
 CREATE INDEX IF NOT EXISTS idx_content_items_office_type ON content_items(office_id, content_type);
 CREATE INDEX IF NOT EXISTS idx_content_versions_status ON content_versions(status);
 CREATE INDEX IF NOT EXISTS idx_content_versions_item_status ON content_versions(content_item_id, status);
+CREATE INDEX IF NOT EXISTS idx_content_versions_published ON content_versions(published_at DESC, id DESC) WHERE status = 'published';
 
 -- Supabase exposes public tables via PostgREST. This app uses DATABASE_URL (server-side
 -- postgres), not the anon/authenticated API. Enable RLS with no permissive policies so
