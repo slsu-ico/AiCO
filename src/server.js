@@ -6,7 +6,7 @@ const { getConfig } = require('./config');
 const { createAdminRouteHandler } = require('./adminRoutes');
 const { createRedisClient, getJson, setJson } = require('./cache/redis');
 const { createPool } = require('./db/postgres');
-const { loadPublishedServices } = require('./publishedContentRepository');
+const { loadPublishedFaqs, loadPublishedServices } = require('./publishedContentRepository');
 const { loadServices } = require('./serviceRepository');
 const { sendMessengerMessage } = require('./messengerApi');
 
@@ -48,12 +48,24 @@ function extractIncomingText(event) {
 function createRequestHandler(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
+  const hasInjectedFaqs = Object.prototype.hasOwnProperty.call(options, 'faqs');
 
-  async function getChatbotServices() {
-    if (hasInjectedServices) return options.services;
-    if (!options.pool || !options.redis) return loadServices();
+  async function getChatbotContent() {
+    if (!options.pool || !options.redis) {
+      return {
+        services: hasInjectedServices ? options.services : loadServices(),
+        faqs: hasInjectedFaqs ? options.faqs : [],
+      };
+    }
 
-    return loadPublishedServices({ pool: options.pool, redis: options.redis });
+    const services = hasInjectedServices
+      ? options.services
+      : await loadPublishedServices({ pool: options.pool, redis: options.redis });
+    const faqs = hasInjectedFaqs
+      ? options.faqs
+      : await loadPublishedFaqs({ pool: options.pool, redis: options.redis });
+
+    return { services, faqs };
   }
 
   async function getBotSession(senderId) {
@@ -119,7 +131,7 @@ function createRequestHandler(options = {}) {
         }
 
         const events = body.entry?.flatMap((entry) => entry.messaging || []) || [];
-        const services = await getChatbotServices();
+        const { services, faqs } = await getChatbotContent();
 
         for (const event of events) {
           const senderId = event.sender?.id;
@@ -127,7 +139,7 @@ function createRequestHandler(options = {}) {
 
           const session = (await getBotSession(senderId)) || createInitialSession();
           const incomingText = extractIncomingText(event);
-          const result = handleUserMessage(session, incomingText, services);
+          const result = handleUserMessage(session, incomingText, services, faqs);
           await setBotSession(senderId, result.session);
 
           for (const reply of result.replies) {

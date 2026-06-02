@@ -143,7 +143,8 @@ test('handles Messenger POST events with injected services', async () => {
 
 test('loads published services for each Messenger event so Redis invalidation can refresh data', async () => {
   const sent = [];
-  let queryCount = 0;
+  let serviceQueryCount = 0;
+  let faqQueryCount = 0;
   const redis = {
     async get() {
       return null;
@@ -153,13 +154,18 @@ test('loads published services for each Messenger event so Redis invalidation ca
     },
   };
   const pool = {
-    async query() {
-      queryCount += 1;
+    async query(text, params = []) {
+      if (params[0] === 'faq') {
+        faqQueryCount += 1;
+        return { rows: [] };
+      }
+
+      serviceQueryCount += 1;
       return {
         rows: [{
           structured_payload: {
-            id: `dynamic-service-${queryCount}`,
-            service_name: `Dynamic Service ${queryCount}`,
+            id: `dynamic-service-${serviceQueryCount}`,
+            service_name: `Dynamic Service ${serviceQueryCount}`,
             description: 'A service loaded from PostgreSQL.',
             audience: 'internal',
             office_or_unit: 'International Office',
@@ -201,9 +207,70 @@ test('loads published services for each Messenger event so Redis invalidation ca
     assert.equal((await sendInternal('user-1')).status, 200);
     assert.equal((await sendInternal('user-2')).status, 200);
 
-    assert.equal(queryCount, 2);
+    assert.equal(serviceQueryCount, 2);
+    assert.equal(faqQueryCount, 2);
     assert.match(sent[0].reply.text, /Dynamic Service 1/);
     assert.match(sent[1].reply.text, /Dynamic Service 2/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('loads published FAQs for Messenger events', async () => {
+  const sent = [];
+  const queryTypes = [];
+  const redis = {
+    async get() {
+      return null;
+    },
+    async set() {
+      return 'OK';
+    },
+  };
+  const pool = {
+    async query(text, params = []) {
+      queryTypes.push(params[0]);
+      if (params[0] === 'citizens_charter_service') {
+        return { rows: [] };
+      }
+      if (params[0] === 'faq') {
+        return {
+          rows: [{
+            structured_payload: {
+              question: 'Where can I get official templates?',
+              answer: 'Email reports@slsu.edu.ph for official templates.',
+            },
+          }],
+        };
+      }
+      throw new Error(`Unexpected content type: ${params[0]}`);
+    },
+  };
+  const server = createServer({
+    verifyToken: 'secret',
+    pool,
+    redis,
+    sendMessage: async (recipientId, reply) => {
+      sent.push({ recipientId, reply });
+    },
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        object: 'page',
+        entry: [{ messaging: [{ sender: { id: 'user-1' }, message: { text: 'official templates' } }] }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(queryTypes, ['citizens_charter_service', 'faq']);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].reply.text, /Where can I get official templates\?/);
+    assert.match(sent[0].reply.text, /reports@slsu\.edu\.ph/);
   } finally {
     await close(server);
   }

@@ -39,11 +39,48 @@ test('matches free-text questions to a service guide', () => {
   assert.match(result.replies[0].text, /https:\/\/forms\.gle\/CsJsfxNxSFt4Swo38/);
 });
 
+test('matches free-text service synonyms to the right service guide', () => {
+  const session = createInitialSession();
+
+  const documentationResult = handleUserMessage(session, 'Can ICO help with report writing?');
+  const layoutResult = handleUserMessage(session, 'Can ICO help with design for our poster?');
+
+  assert.equal(documentationResult.session.state, 'viewing_service');
+  assert.match(documentationResult.replies[0].text, /Request for article and\/or report writing/);
+  assert.equal(layoutResult.session.state, 'viewing_service');
+  assert.match(layoutResult.replies[0].text, /Request for layout of IEC materials/);
+});
+
+test('uses Messenger-safe quick reply labels for service lists', () => {
+  const session = createInitialSession();
+  const result = handleUserMessage(session, 'hello');
+
+  assert.ok(result.replies[0].quickReplies.length <= 13);
+  assert.ok(result.replies[0].quickReplies.every((reply) => reply.title.length <= 20));
+  assert.ok(result.replies[0].quickReplies.some((reply) => reply.title === 'Audiovisual'));
+  assert.ok(result.replies[0].quickReplies.some((reply) => reply.payload === 'SERVICE_internal-audiovisual-production'));
+});
+
+test('answers published FAQs before handing off', () => {
+  const session = createInitialSession();
+  const faqs = [{
+    question: 'Where can I get official templates?',
+    answer: 'Email reports@slsu.edu.ph for official templates.',
+  }];
+  const result = handleUserMessage(session, 'I need the templates for social media posts', undefined, faqs);
+
+  assert.equal(result.session.state, 'viewing_faq');
+  assert.match(result.replies[0].text, /Where can I get official templates\?/);
+  assert.match(result.replies[0].text, /reports@slsu\.edu\.ph/);
+});
+
 test('hands off when free text is outside the charter', () => {
   const session = createInitialSession();
   const result = handleUserMessage(session, 'How do I enroll as a first year student?');
 
   assert.equal(result.session.state, 'handoff');
   assert.match(result.replies[0].text, /I can only confirm details listed in the ICO Citizen's Charter/);
+  assert.match(result.replies[0].text, /reports@slsu\.edu\.ph/);
+  assert.match(result.replies[0].text, /https:\/\/www\.slsu\.edu\.ph/);
   assert.ok(result.replies[0].quickReplies.some((reply) => reply.payload === 'BACK_TO_START'));
 });

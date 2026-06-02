@@ -20,6 +20,22 @@ const STOP_WORDS = new Set([
   'your',
   'their',
   'about',
+  'can',
+  'help',
+]);
+
+const TOKEN_SYNONYMS = new Map([
+  ['article', ['write', 'writing', 'copy', 'content', 'documentation']],
+  ['avp', ['audiovisual', 'video', 'production', 'multimedia']],
+  ['design', ['layout', 'pubmat', 'poster', 'tarpaulin', 'brochure', 'flyer', 'graphics']],
+  ['documentation', ['photo', 'video', 'coverage', 'recording', 'footage']],
+  ['layout', ['design', 'pubmat', 'poster', 'tarpaulin', 'brochure', 'flyer', 'graphics']],
+  ['posting', ['facebook', 'website', 'publish', 'announcement', 'email', 'blast']],
+  ['report', ['article', 'write', 'writing', 'documentation', 'content']],
+  ['review', ['check', 'proofread', 'edit', 'approve']],
+  ['speakership', ['speaker', 'seminar', 'training', 'workshop']],
+  ['write', ['article', 'report', 'writing', 'copy', 'content', 'documentation']],
+  ['writing', ['article', 'report', 'write', 'copy', 'content', 'documentation']],
 ]);
 
 function loadServices(dataPath = DEFAULT_DATA_PATH) {
@@ -43,6 +59,16 @@ function tokenize(text) {
     .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
 }
 
+function expandTokens(tokens) {
+  const expanded = new Set(tokens);
+  for (const token of tokens) {
+    for (const synonym of TOKEN_SYNONYMS.get(token) || []) {
+      expanded.add(synonym);
+    }
+  }
+  return [...expanded];
+}
+
 function serviceSearchText(service) {
   return [
     service.id,
@@ -58,7 +84,7 @@ function serviceSearchText(service) {
 }
 
 function searchServices(query, services = loadServices()) {
-  const tokens = tokenize(query);
+  const tokens = expandTokens(tokenize(query));
   if (tokens.length === 0) return [];
 
   const scored = services
