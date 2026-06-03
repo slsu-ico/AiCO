@@ -84,6 +84,7 @@ function createAdminServer({
   uploadDir,
   csrfProtection = false,
   sessionSecret = 'test-session-secret',
+  notificationMailer,
 }) {
   return createServer({
     pool,
@@ -92,6 +93,7 @@ function createAdminServer({
     services: [],
     csrfProtection,
     sessionSecret,
+    notificationMailer,
     verifyToken: 'secret',
     sendMessage: async () => {},
   });
@@ -1536,6 +1538,63 @@ test('admin can view pending content review list and detail', async () => {
   }
 });
 
+test('content review detail shows current published version diff and history link', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_versions cv') && sqlIncludes(text, 'WHERE cv.id = $1')) {
+      assert.deepEqual(params, [55]);
+      return {
+        rows: [
+          {
+            id: 55,
+            content_item_id: 90,
+            title: 'Scholarship FAQ updated',
+            body: 'Bring the scholarship certificate and valid ID.',
+            status: 'pending_review',
+            content_type: 'faq',
+            office_id: 7,
+            office_name: 'International Office',
+            structured_payload: { question: 'Scholarship FAQ updated', answer: 'Bring ID.' },
+            submitted_at: '2026-05-12T02:00:00.000Z',
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, 'current_published_version_id')) {
+      assert.deepEqual(params, [90]);
+      return {
+        rows: [
+          {
+            id: 44,
+            title: 'Scholarship FAQ',
+            body: 'Bring the scholarship certificate.',
+            structured_payload: { question: 'Scholarship FAQ', answer: 'Bring certificate.' },
+            published_at: '2026-05-10T02:00:00.000Z',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55`, { headers: { cookie } });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Changed fields/);
+    assert.match(html, /Current published/);
+    assert.match(html, /Pending submission/);
+    assert.match(html, /Scholarship FAQ updated/);
+    assert.match(html, /href="\/admin\/content\/90\/history"/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('admin content reviews are paginated and searchable by title or office', async () => {
   const redis = new FakeRedis();
   const cookie = await adminCookie(redis);
@@ -1640,6 +1699,75 @@ test('admin approval publishes content, invalidates caches, and warms published 
       JSON.stringify([{ question: 'Fresh FAQ', answer: 'Published.' }]),
     );
     assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin approval sends a non-blocking decision notification to the submitter', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const notifications = [];
+  const notificationMailer = {
+    async sendContentReviewDecision(message) {
+      notifications.push(message);
+    },
+  };
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return { rows: [{ id: 55, content_item_id: 90, status: 'pending_review' }] };
+    }
+    if (sqlIncludes(text, "SET status = 'published'")) {
+      return { rows: [{ id: 55, content_item_id: 90 }] };
+    }
+    if (sqlIncludes(text, 'current_published_version_id = $2')) {
+      return { rows: [{ id: 90 }] };
+    }
+    if (sqlIncludes(text, 'submitted_by_user.email')) {
+      assert.deepEqual(params, [55]);
+      return {
+        rows: [
+          {
+            id: 55,
+            title: 'Scholarship FAQ',
+            status: 'published',
+            submitter_email: 'editor@slsu.edu.ph',
+            submitter_name: 'Office Editor',
+            office_name: 'International Office',
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'citizens_charter_service') {
+      return { rows: [] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'faq') {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis, notificationMailer });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/approve`, {
+      method: 'POST',
+      headers: { cookie },
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.deepEqual(notifications, [
+      {
+        to: 'editor@slsu.edu.ph',
+        recipientName: 'Office Editor',
+        title: 'Scholarship FAQ',
+        status: 'published',
+        officeName: 'International Office',
+        note: '',
+      },
+    ]);
   } finally {
     await close(server);
   }
@@ -1753,6 +1881,190 @@ test('needs-revision review action stores reviewer note', async () => {
       'needs_revision',
       'Please add processing time and requirements.',
     ]);
+  } finally {
+    await close(server);
+  }
+});
+
+test('needs-revision review action notifies the submitter with the review note', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const notifications = [];
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return { rows: [{ id: 55, content_item_id: 90, status: 'pending_review' }] };
+    }
+    if (sqlIncludes(text, 'UPDATE content_versions') && sqlIncludes(text, 'status = $2')) {
+      return { rows: [{ id: 55 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO review_notes')) {
+      return { rows: [{ id: 500 }] };
+    }
+    if (sqlIncludes(text, 'submitted_by_user.email')) {
+      assert.deepEqual(params, [55]);
+      return {
+        rows: [
+          {
+            id: 55,
+            title: 'Scholarship FAQ',
+            status: 'needs_revision',
+            submitter_email: 'editor@slsu.edu.ph',
+            submitter_name: 'Office Editor',
+            office_name: 'International Office',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({
+    pool,
+    redis,
+    notificationMailer: {
+      async sendContentReviewDecision(message) {
+        notifications.push(message);
+      },
+    },
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/needs-revision`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ note: 'Please add processing time.' }),
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(notifications[0].to, 'editor@slsu.edu.ph');
+    assert.equal(notifications[0].status, 'needs_revision');
+    assert.equal(notifications[0].note, 'Please add processing time.');
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin can view content item audit history', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM content_items ci') && sqlIncludes(text, 'WHERE ci.id = $1')) {
+      assert.deepEqual(params, [90]);
+      return {
+        rows: [
+          {
+            id: 90,
+            content_type: 'faq',
+            office_name: 'International Office',
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, 'FROM review_notes rn') && sqlIncludes(text, 'cv.content_item_id = $1')) {
+      assert.deepEqual(params, [90]);
+      return {
+        rows: [
+          {
+            id: 500,
+            action: 'needs_revision',
+            note: 'Please add processing time.',
+            created_at: '2026-06-03T01:00:00.000Z',
+            reviewer_name: 'Bootstrap Admin',
+            version_title: 'Scholarship FAQ',
+            version_status: 'needs_revision',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/content/90/history`, { headers: { cookie } });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Content history/);
+    assert.match(html, /International Office/);
+    assert.match(html, /Please add processing time/);
+    assert.match(html, /Bootstrap Admin/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin can list and update users', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  let activeUpdateParams;
+  let assignmentUpdateParams;
+  const pool = createFakePool(async (text, params) => {
+    if (sqlIncludes(text, 'FROM users u') && sqlIncludes(text, 'LEFT JOIN offices o')) {
+      return {
+        rows: [
+          {
+            id: 22,
+            full_name: 'Office Editor',
+            email: 'editor@slsu.edu.ph',
+            role: 'office_user',
+            active: true,
+            office_id: 7,
+            office_name: 'International Office',
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, 'FROM offices') && sqlIncludes(text, 'active = true')) {
+      return { rows: [{ id: 7, name: 'International Office' }] };
+    }
+    if (sqlIncludes(text, 'UPDATE users') && sqlIncludes(text, 'SET active = $2')) {
+      activeUpdateParams = params;
+      return { rows: [{ id: 22 }] };
+    }
+    if (sqlIncludes(text, 'UPDATE users') && sqlIncludes(text, 'SET role = $2')) {
+      assignmentUpdateParams = params;
+      return { rows: [{ id: 22 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const list = await fetch(`${baseUrl}/admin/users`, { headers: { cookie } });
+    const html = await list.text();
+    assert.equal(list.status, 200);
+    assert.match(html, /User management/);
+    assert.match(html, /editor@slsu.edu.ph/);
+    assert.match(html, /action="\/admin\/users\/22\/deactivate"/);
+    assert.match(html, /action="\/admin\/users\/22\/assignment"/);
+
+    const deactivate = await fetch(`${baseUrl}/admin/users/22/deactivate`, {
+      method: 'POST',
+      headers: { cookie },
+      redirect: 'manual',
+    });
+    assert.equal(deactivate.status, 303);
+    assert.deepEqual(activeUpdateParams, [22, false]);
+
+    const assign = await fetch(`${baseUrl}/admin/users/22/assignment`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ role: 'admin', office_id: '7' }),
+      redirect: 'manual',
+    });
+    assert.equal(assign.status, 303);
+    assert.deepEqual(assignmentUpdateParams, [22, 'admin', 7]);
   } finally {
     await close(server);
   }

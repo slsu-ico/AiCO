@@ -9,6 +9,7 @@ const navByRole = {
     { href: '/admin', label: 'Dashboard' },
     { href: '/admin/account-requests', label: 'Account requests' },
     { href: '/admin/reviews', label: 'Content reviews' },
+    { href: '/admin/users', label: 'Users' },
   ],
   office_user: [
     { href: '/admin', label: 'Dashboard' },

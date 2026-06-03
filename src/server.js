@@ -90,6 +90,7 @@ function createRequestHandler(options = {}) {
     sessionSecret: options.sessionSecret,
     secureCookies: options.secureCookies,
     csrfProtection: options.csrfProtection,
+    notificationMailer: options.notificationMailer,
   });
 
   const sendMessage =

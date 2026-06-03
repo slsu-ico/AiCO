@@ -13,6 +13,7 @@ const {
   renderAccountRequest,
   renderAccountRequestRows,
   renderAdminDashboard,
+  renderContentHistory,
   renderContentReviewDetail,
   renderContentReviewRows,
   renderFilterBar,
@@ -20,6 +21,7 @@ const {
   renderNewContentForm,
   renderOfficeDashboard,
   renderPagination,
+  renderUserManagement,
 } = require('./adminViews');
 const {
   clearSessionCookie,
@@ -885,6 +887,7 @@ async function handleContentReviewDetail({ response, pool, user, id, url }) {
   const result = await pool.query(
     `
       SELECT cv.id,
+             cv.content_item_id,
              cv.title,
              cv.body,
              cv.status,
@@ -908,12 +911,196 @@ async function handleContentReviewDetail({ response, pool, user, id, url }) {
     return;
   }
 
+  let publishedVersion = null;
+  if (review.content_item_id) {
+    const publishedResult = await pool.query(
+      `
+        SELECT published_cv.id,
+               published_cv.title,
+               published_cv.body,
+               published_cv.structured_payload,
+               published_cv.published_at
+        FROM content_items ci
+        JOIN content_versions published_cv ON published_cv.id = ci.current_published_version_id
+        WHERE ci.id = $1
+        LIMIT 1
+      `,
+      [review.content_item_id],
+    );
+    publishedVersion = publishedResult.rows[0] || null;
+  }
+
   const notice = noticeText(clean(url?.searchParams?.get('notice')), {
     rejected: 'Content rejected.',
     needs_revision: 'Content returned for revision.',
   });
 
-  sendHtml(response, 200, renderContentReviewDetail(review, user, { notice }));
+  sendHtml(response, 200, renderContentReviewDetail(review, user, { notice, publishedVersion }));
+}
+
+async function loadReviewNotification(pool, id, status, note = '') {
+  const result = await pool.query(
+    `
+      SELECT cv.id,
+             cv.title,
+             submitted_by_user.email AS submitter_email,
+             submitted_by_user.full_name AS submitter_name,
+             o.name AS office_name
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      LEFT JOIN users submitted_by_user ON submitted_by_user.id = cv.submitted_by
+      LEFT JOIN offices o ON o.id = ci.office_id
+      WHERE cv.id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+  const review = result.rows[0];
+  if (!review?.submitter_email) return null;
+
+  return {
+    to: review.submitter_email,
+    recipientName: review.submitter_name || '',
+    title: review.title || '',
+    status,
+    officeName: review.office_name || '',
+    note,
+  };
+}
+
+async function notifyContentReviewDecision({ notificationMailer, pool, id, status, note = '' }) {
+  if (!notificationMailer?.sendContentReviewDecision) return;
+
+  try {
+    const message = await loadReviewNotification(pool, id, status, note);
+    if (message) await notificationMailer.sendContentReviewDecision(message);
+  } catch {
+    // Notification delivery should not undo a completed review decision.
+  }
+}
+
+async function handleContentHistory({ response, pool, user, id }) {
+  const itemResult = await pool.query(
+    `
+      SELECT ci.id,
+             ci.content_type,
+             o.name AS office_name
+      FROM content_items ci
+      LEFT JOIN offices o ON o.id = ci.office_id
+      WHERE ci.id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+  const contentItem = itemResult.rows[0];
+
+  if (!contentItem) {
+    notFound(response);
+    return;
+  }
+
+  const notesResult = await pool.query(
+    `
+      SELECT rn.id,
+             rn.action,
+             rn.note,
+             rn.created_at,
+             reviewer.full_name AS reviewer_name,
+             cv.title AS version_title,
+             cv.status AS version_status
+      FROM review_notes rn
+      JOIN content_versions cv ON cv.id = rn.content_version_id
+      LEFT JOIN users reviewer ON reviewer.id = rn.reviewer_id
+      WHERE cv.content_item_id = $1
+      ORDER BY rn.created_at DESC, rn.id DESC
+    `,
+    [id],
+  );
+
+  sendHtml(response, 200, renderContentHistory(contentItem, notesResult.rows, user));
+}
+
+async function handleUsersIndex({ response, pool, user, url }) {
+  const notice = noticeText(clean(url?.searchParams?.get('notice')), {
+    deactivated: 'User deactivated.',
+    reactivated: 'User reactivated.',
+    updated: 'User assignment updated.',
+  });
+  const usersResult = await pool.query(
+    `
+      SELECT u.id,
+             u.full_name,
+             u.email,
+             u.role,
+             u.active,
+             u.office_id,
+             o.name AS office_name
+      FROM users u
+      LEFT JOIN offices o ON o.id = u.office_id
+      ORDER BY u.full_name ASC, u.email ASC
+    `,
+  );
+  const officesResult = await pool.query(
+    `
+      SELECT id, name
+      FROM offices
+      WHERE active = true
+      ORDER BY name ASC
+    `,
+  );
+
+  sendHtml(
+    response,
+    200,
+    renderUserManagement(usersResult.rows, officesResult.rows, user, { notice }),
+  );
+}
+
+async function handleUserActivation({ response, pool, id, active }) {
+  await pool.query(
+    `
+      UPDATE users
+      SET active = $2,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING id
+    `,
+    [id, active],
+  );
+
+  redirect(response, `/admin/users?notice=${active ? 'reactivated' : 'deactivated'}`);
+}
+
+async function handleUserAssignment({ request, response, pool, user, id, csrfProtection }) {
+  const form = await readForm(request);
+  if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
+
+  const role = clean(form.role);
+  const officeId = Number(clean(form.office_id));
+
+  if (!VALID_ROLES.has(role)) {
+    renderBadRequest(response, 'A valid role is required.', user);
+    return;
+  }
+
+  if (!Number.isInteger(officeId) || officeId < 1) {
+    renderBadRequest(response, 'A valid office is required.', user);
+    return;
+  }
+
+  await pool.query(
+    `
+      UPDATE users
+      SET role = $2,
+          office_id = $3,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING id
+    `,
+    [id, role, officeId],
+  );
+
+  redirect(response, '/admin/users?notice=updated');
 }
 
 async function lockContentVersion(client, id) {
@@ -954,7 +1141,7 @@ async function handleCacheRefresh({ response, pool, redis }) {
   redirect(response, '/admin?cache_refreshed=1');
 }
 
-async function handleContentApprove({ response, pool, redis, user, id }) {
+async function handleContentApprove({ response, pool, redis, user, id, notificationMailer }) {
   await withTransaction(pool, async (client) => {
     const version = await lockContentVersion(client, id);
 
@@ -986,6 +1173,12 @@ async function handleContentApprove({ response, pool, redis, user, id }) {
 
   await invalidatePublishedCache(redis);
   await warmPublishedContentCache({ pool, redis });
+  await notifyContentReviewDecision({
+    notificationMailer,
+    pool,
+    id,
+    status: 'published',
+  });
   redirect(response, '/admin/reviews?notice=approved');
 }
 
@@ -997,6 +1190,7 @@ async function handleContentReviewStatus({
   id,
   status,
   csrfProtection,
+  notificationMailer,
 }) {
   const form = await readForm(request);
   if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) return;
@@ -1040,6 +1234,13 @@ async function handleContentReviewStatus({
     );
   });
 
+  await notifyContentReviewDecision({
+    notificationMailer,
+    pool,
+    id,
+    status,
+    note,
+  });
   redirect(response, `/admin/reviews/${id}?notice=${status}`);
 }
 
@@ -1064,6 +1265,20 @@ function parseContentReviewAction(pathname) {
 function parseContentReviewDetail(pathname) {
   const match = pathname.match(/^\/admin\/reviews\/(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+function parseContentHistory(pathname) {
+  const match = pathname.match(/^\/admin\/content\/(\d+)\/history$/);
+  return match ? Number(match[1]) : null;
+}
+
+function parseUserAction(pathname) {
+  const match = pathname.match(/^\/admin\/users\/(\d+)\/(deactivate|reactivate|assignment)$/);
+  if (!match) return null;
+  return {
+    id: Number(match[1]),
+    action: match[2],
+  };
 }
 
 async function handleApprove({ request, response, pool, user, id, csrfProtection }) {
@@ -1194,6 +1409,7 @@ function createAdminRouteHandler(options = {}) {
     pool: options.pool,
     redis: options.redis,
     uploadDir: options.uploadDir || 'uploads',
+    notificationMailer: options.notificationMailer,
   };
   const secureCookies = options.secureCookies;
   const csrfProtection = options.csrfProtection !== false;
@@ -1318,6 +1534,62 @@ function createAdminRouteHandler(options = {}) {
       return true;
     }
 
+    if (pathname === '/admin/users') {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      await handleUsersIndex({ response, pool: services.pool, user, url });
+      return true;
+    }
+
+    const userAction = parseUserAction(pathname);
+    if (userAction) {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'POST') {
+        methodNotAllowed(response, ['POST']);
+        return true;
+      }
+
+      if (userAction.action === 'assignment') {
+        await handleUserAssignment({
+          request,
+          response,
+          pool: services.pool,
+          user,
+          id: userAction.id,
+          csrfProtection,
+        });
+        return true;
+      }
+
+      if (
+        !(await validateCsrf({
+          request,
+          response,
+          user,
+          form: await readForm(request),
+          csrfProtection,
+        }))
+      ) {
+        return true;
+      }
+
+      await handleUserActivation({
+        response,
+        pool: services.pool,
+        id: userAction.id,
+        active: userAction.action === 'reactivate',
+      });
+      return true;
+    }
+
     if (pathname === '/admin/submissions') {
       const user = await requireOfficeUser({ request, response, redis: services.redis });
       if (!user) return true;
@@ -1369,6 +1641,25 @@ function createAdminRouteHandler(options = {}) {
         user,
         uploadDir: services.uploadDir,
         csrfProtection,
+      });
+      return true;
+    }
+
+    const contentHistoryId = parseContentHistory(pathname);
+    if (contentHistoryId !== null) {
+      const user = await requireReviewAdmin({ request, response, redis: services.redis });
+      if (!user) return true;
+
+      if (request.method !== 'GET') {
+        methodNotAllowed(response, ['GET']);
+        return true;
+      }
+
+      await handleContentHistory({
+        response,
+        pool: services.pool,
+        user,
+        id: contentHistoryId,
       });
       return true;
     }
@@ -1457,6 +1748,7 @@ function createAdminRouteHandler(options = {}) {
           redis: services.redis,
           user,
           id: contentReviewAction.id,
+          notificationMailer: services.notificationMailer,
         });
         return true;
       }
@@ -1469,6 +1761,7 @@ function createAdminRouteHandler(options = {}) {
         id: contentReviewAction.id,
         status: contentReviewAction.action === 'reject' ? 'rejected' : 'needs_revision',
         csrfProtection,
+        notificationMailer: services.notificationMailer,
       });
       return true;
     }

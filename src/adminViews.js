@@ -3,6 +3,7 @@ const {
   FIELD_LIMITS,
   LIST_PAGE_SIZE,
   VALID_CONTENT_TYPES,
+  VALID_ROLES,
 } = require('./adminConstants');
 const { escapeHtml } = require('./httpUtils');
 const { pageLayout } = require('./layout');
@@ -415,6 +416,68 @@ function renderContentReviewRows(rows) {
   `;
 }
 
+function normalizePayload(value) {
+  return JSON.stringify(value || {}, null, 2);
+}
+
+function diffRows(review, publishedVersion) {
+  const fields = [
+    ['Title', review.title || '', publishedVersion?.title || ''],
+    ['Body', review.body || '', publishedVersion?.body || ''],
+    [
+      'Structured payload',
+      normalizePayload(review.structured_payload),
+      normalizePayload(publishedVersion?.structured_payload),
+    ],
+  ];
+
+  return fields
+    .map(([label, pending, published]) => {
+      const changed = pending !== published;
+      return `
+        <tr class="${changed ? 'is-changed' : ''}">
+          <th scope="row">${escapeHtml(label)}${changed ? ' <span>Changed</span>' : ''}</th>
+          <td><pre>${escapeHtml(published || 'No published value')}</pre></td>
+          <td><pre>${escapeHtml(pending || 'No submitted value')}</pre></td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function renderPublishedComparison(review, publishedVersion) {
+  if (!review.content_item_id) return '';
+
+  if (!publishedVersion) {
+    return `
+      <section>
+        <h2>Changed fields</h2>
+        <p>No published version yet.</p>
+        <p><a href="/admin/content/${escapeHtml(review.content_item_id)}/history">View full history</a></p>
+      </section>
+    `;
+  }
+
+  return `
+    <section>
+      <h2>Changed fields</h2>
+      <p><a href="/admin/content/${escapeHtml(review.content_item_id)}/history">View full history</a></p>
+      <div class="table-scroll">
+        <table class="diff-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Current published</th>
+              <th>Pending submission</th>
+            </tr>
+          </thead>
+          <tbody>${diffRows(review, publishedVersion)}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderContentReviewDetail(review, user, options = {}) {
   const payload = JSON.stringify(review.structured_payload || {}, null, 2);
 
@@ -435,6 +498,7 @@ function renderContentReviewDetail(review, user, options = {}) {
         <h2>Structured payload</h2>
         <pre>${escapeHtml(payload)}</pre>
       </section>
+      ${renderPublishedComparison(review, options.publishedVersion)}
       <form method="post" action="/admin/reviews/${escapeHtml(review.id)}/approve">
         ${csrfInput(user)}
         <button type="submit">Approve and publish</button>
@@ -453,10 +517,127 @@ function renderContentReviewDetail(review, user, options = {}) {
   });
 }
 
+function renderContentHistory(contentItem, notes, user) {
+  const noteRows =
+    notes.length === 0
+      ? '<tr><td colspan="5">No review notes have been recorded for this content item.</td></tr>'
+      : notes
+          .map(
+            (note) => `
+        <tr>
+          <td>${escapeHtml(note.created_at || '')}</td>
+          <td>${escapeHtml(note.action || '')}</td>
+          <td>${escapeHtml(note.version_title || '')}<span>${escapeHtml(note.version_status || '')}</span></td>
+          <td>${escapeHtml(note.reviewer_name || 'Unknown reviewer')}</td>
+          <td>${escapeHtml(note.note || '')}</td>
+        </tr>
+      `,
+          )
+          .join('');
+
+  return pageLayout({
+    title: 'Content history',
+    activePath: '/admin/reviews',
+    user,
+    body: `
+      <p><strong>${escapeHtml(CONTENT_TYPE_LABELS[contentItem.content_type] || contentItem.content_type)}</strong> from ${escapeHtml(contentItem.office_name || '')}</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Version</th>
+              <th>Reviewer</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>${noteRows}</tbody>
+        </table>
+      </div>
+    `,
+  });
+}
+
+function officeOptions(offices, selectedOfficeId) {
+  return offices
+    .map((office) => option(String(office.id), office.name, String(selectedOfficeId || '')))
+    .join('');
+}
+
+function roleOptions(selectedRole) {
+  return [...VALID_ROLES]
+    .map((role) => option(role, formatStatus(role), selectedRole))
+    .join('');
+}
+
+function renderUserManagement(users, offices, user, options = {}) {
+  const rows =
+    users.length === 0
+      ? '<tr><td colspan="6">No users found.</td></tr>'
+      : users
+          .map((account) => {
+            const activeAction = account.active ? 'deactivate' : 'reactivate';
+            const activeLabel = account.active ? 'Deactivate' : 'Reactivate';
+            return `
+        <tr>
+          <td><strong>${escapeHtml(account.full_name || '')}</strong><span>${escapeHtml(account.email || '')}</span></td>
+          <td>${escapeHtml(formatStatus(account.role))}</td>
+          <td>${escapeHtml(account.office_name || '')}</td>
+          <td>${escapeHtml(account.active ? 'Active' : 'Inactive')}</td>
+          <td>
+            <form method="post" action="/admin/users/${escapeHtml(account.id)}/${activeAction}">
+              ${csrfInput(user)}
+              <button type="submit">${activeLabel}</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="/admin/users/${escapeHtml(account.id)}/assignment">
+              ${csrfInput(user)}
+              <label>Role
+                <select name="role" required>${roleOptions(account.role)}</select>
+              </label>
+              <label>Office
+                <select name="office_id" required>${officeOptions(offices, account.office_id)}</select>
+              </label>
+              <button type="submit">Update</button>
+            </form>
+          </td>
+        </tr>
+      `;
+          })
+          .join('');
+
+  return pageLayout({
+    title: 'User management',
+    activePath: '/admin/users',
+    user,
+    notice: options.notice,
+    body: `
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Office</th>
+              <th>Status</th>
+              <th>Activation</th>
+              <th>Assignment</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `,
+  });
+}
+
 module.exports = {
   renderAccountRequest,
   renderAccountRequestRows,
   renderAdminDashboard,
+  renderContentHistory,
   renderContentReviewDetail,
   renderContentReviewRows,
   renderFilterBar,
@@ -464,4 +645,5 @@ module.exports = {
   renderNewContentForm,
   renderOfficeDashboard,
   renderPagination,
+  renderUserManagement,
 };
