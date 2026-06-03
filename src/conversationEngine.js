@@ -166,89 +166,134 @@ function cloneSession(session) {
   };
 }
 
+function withAnalytics(result, analytics = []) {
+  return {
+    ...result,
+    analytics,
+  };
+}
+
 function handleUserMessage(session, message, services = loadServices(), faqs = []) {
   const current = cloneSession(session);
   const input = normalizeMessage(message);
 
   if (!input || input === 'BACK_TO_START') {
-    return {
+    return withAnalytics({
       session: { ...createInitialSession(), state: 'selecting_service' },
       replies: [serviceListAllReply(services)],
-    };
+    });
   }
 
   if (input === 'HANDOFF') {
-    return {
-      session: { ...current, state: 'handoff' },
-      replies: [handoffReply()],
-    };
+    return withAnalytics(
+      {
+        session: { ...current, state: 'handoff' },
+        replies: [handoffReply()],
+      },
+      [{ name: 'chatbot_handoff', reason: 'requested' }],
+    );
   }
 
   if (input === 'BACK_TO_SERVICES' && current.audience) {
-    return {
+    return withAnalytics({
       session: { ...current, state: 'selecting_service' },
       replies: [serviceListAllReply(services)],
-    };
+    });
   }
 
   if (input.startsWith('SERVICE_')) {
     const serviceId = input.slice('SERVICE_'.length);
     const service = findServiceById(serviceId, services);
     if (!service) {
-      return {
-        session: { ...current, state: 'handoff' },
-        replies: [handoffReply()],
-      };
+      return withAnalytics(
+        {
+          session: { ...current, state: 'handoff' },
+          replies: [handoffReply()],
+        },
+        [
+          { name: 'chatbot_handoff', reason: 'service_not_found' },
+          { name: 'chatbot_unanswered_question', question: input },
+        ],
+      );
     }
 
-    return {
-      session: {
-        ...current,
-        audience: service.audience,
-        lastServiceId: service.id,
-        state: 'viewing_service',
+    return withAnalytics(
+      {
+        session: {
+          ...current,
+          audience: service.audience,
+          lastServiceId: service.id,
+          state: 'viewing_service',
+        },
+        replies: [serviceGuideReply(service)],
       },
-      replies: [serviceGuideReply(service)],
-    };
+      [
+        {
+          name: 'chatbot_service_answered',
+          serviceId: service.id,
+          serviceName: service.service_name,
+          matchType: 'payload',
+        },
+      ],
+    );
   }
 
   if (input.toLowerCase() === 'hello' || input.toLowerCase() === 'hi') {
-    return {
+    return withAnalytics({
       session: { ...current, state: 'selecting_service' },
       replies: [serviceListAllReply(services)],
-    };
+    });
   }
   // previous audience selection removed: always show services list or match by free text
 
   const faqMatches = searchFaqs(input, faqs);
   if (faqMatches.length > 0) {
-    return {
-      session: {
-        ...current,
-        state: 'viewing_faq',
+    return withAnalytics(
+      {
+        session: {
+          ...current,
+          state: 'viewing_faq',
+        },
+        replies: [faqReply(faqMatches[0])],
       },
-      replies: [faqReply(faqMatches[0])],
-    };
+      [{ name: 'chatbot_faq_answered', question: faqMatches[0].question }],
+    );
   }
 
   const matches = searchServices(input, services);
   if (matches.length > 0) {
     const service = matches[0];
-    return {
-      session: {
-        ...current,
-        audience: service.audience,
-        lastServiceId: service.id,
-        state: 'viewing_service',
+    return withAnalytics(
+      {
+        session: {
+          ...current,
+          audience: service.audience,
+          lastServiceId: service.id,
+          state: 'viewing_service',
+        },
+        replies: [serviceGuideReply(service)],
       },
-      replies: [serviceGuideReply(service)],
-    };
+      [
+        {
+          name: 'chatbot_service_answered',
+          serviceId: service.id,
+          serviceName: service.service_name,
+          matchType: 'free_text',
+        },
+      ],
+    );
   }
 
-  return {
-    session: { ...current, state: 'handoff' },
-    replies: [handoffReply()],
-  };
+  return withAnalytics(
+    {
+      session: { ...current, state: 'handoff' },
+      replies: [handoffReply()],
+    },
+    [
+      { name: 'chatbot_handoff', reason: 'unanswered' },
+      { name: 'chatbot_unanswered_question', question: input },
+    ],
+  );
 }
 
 module.exports = {

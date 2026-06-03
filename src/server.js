@@ -10,9 +10,50 @@ const { loadPublishedFaqs, loadPublishedServices } = require('./publishedContent
 const { loadServices } = require('./serviceRepository');
 const { sendMessengerMessage } = require('./messengerApi');
 
+const SERVICE_NAME = 'ico-services-messenger-chatbot';
+
 function sendText(response, statusCode, body) {
   response.writeHead(statusCode, { 'content-type': 'text/plain' });
   response.end(body);
+}
+
+function sendJson(response, statusCode, body) {
+  response.writeHead(statusCode, { 'content-type': 'application/json' });
+  response.end(JSON.stringify(body));
+}
+
+function createRequestId(request) {
+  return (
+    request.headers['x-request-id'] ||
+    request.headers['x-vercel-id'] ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  );
+}
+
+function createConsoleLogger() {
+  function write(level, entry) {
+    const payload = {
+      level,
+      service: SERVICE_NAME,
+      timestamp: new Date().toISOString(),
+      ...entry,
+    };
+    const line = JSON.stringify(payload);
+    if (level === 'error') {
+      console.error(line);
+      return;
+    }
+    console.log(line);
+  }
+
+  return {
+    info(entry) {
+      write('info', entry);
+    },
+    error(entry) {
+      write('error', entry);
+    },
+  };
 }
 
 function publicErrorMessage(error, statusCode) {
@@ -36,6 +77,46 @@ function readJson(request) {
   });
 }
 
+async function checkReadiness(options) {
+  const checks = {};
+
+  if (options.pool) {
+    try {
+      await options.pool.query('select 1');
+      checks.postgres = 'ok';
+    } catch {
+      checks.postgres = 'error';
+    }
+  } else {
+    checks.postgres = 'skipped';
+  }
+
+  if (options.redis) {
+    try {
+      if (typeof options.redis.ping === 'function') {
+        await options.redis.ping();
+      } else {
+        await options.redis.get('__ready__');
+      }
+      checks.redis = 'ok';
+    } catch {
+      checks.redis = 'error';
+    }
+  } else {
+    checks.redis = 'skipped';
+  }
+
+  const ready = Object.values(checks).every((status) => status !== 'error');
+  return {
+    statusCode: ready ? 200 : 503,
+    body: {
+      status: ready ? 'ready' : 'not_ready',
+      service: SERVICE_NAME,
+      checks,
+    },
+  };
+}
+
 const BOT_SESSION_TTL_SECONDS = 60 * 60;
 
 function extractIncomingText(event) {
@@ -49,6 +130,12 @@ function createRequestHandler(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
   const hasInjectedFaqs = Object.prototype.hasOwnProperty.call(options, 'faqs');
+  const logger = options.logger || createConsoleLogger();
+  const trackAnalytics =
+    options.trackAnalytics ||
+    ((event) => {
+      logger.info({ msg: 'chatbot_analytics', ...event });
+    });
 
   async function getChatbotContent() {
     if (!options.pool || !options.redis) {
@@ -101,8 +188,43 @@ function createRequestHandler(options = {}) {
 
   return async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
+    const requestId = createRequestId(request);
+    const start = Date.now();
+
+    response.setHeader('x-request-id', requestId);
+    logger.info({
+      msg: 'request_start',
+      requestId,
+      method: request.method,
+      route: url.pathname,
+    });
+
+    response.once('finish', () => {
+      logger.info({
+        msg: 'request_done',
+        requestId,
+        method: request.method,
+        route: url.pathname,
+        statusCode: response.statusCode,
+        ms: Date.now() - start,
+      });
+    });
 
     try {
+      if (request.method === 'GET' && url.pathname === '/health') {
+        sendJson(response, 200, {
+          status: 'ok',
+          service: SERVICE_NAME,
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/ready') {
+        const readiness = await checkReadiness(options);
+        sendJson(response, readiness.statusCode, readiness.body);
+        return;
+      }
+
       if (await handleAdminRoutes(request, response, url)) {
         return;
       }
@@ -147,6 +269,14 @@ function createRequestHandler(options = {}) {
           const result = handleUserMessage(session, incomingText, services, faqs);
           await setBotSession(senderId, result.session);
 
+          for (const analyticsEvent of result.analytics || []) {
+            trackAnalytics({
+              ...analyticsEvent,
+              requestId,
+              senderId,
+            });
+          }
+
           for (const reply of result.replies) {
             await sendMessage(senderId, reply);
           }
@@ -160,6 +290,14 @@ function createRequestHandler(options = {}) {
     } catch (error) {
       if (!response.headersSent) {
         const statusCode = error.statusCode || 500;
+        logger.error({
+          msg: 'request_failed',
+          requestId,
+          method: request.method,
+          route: url.pathname,
+          error: error.message || String(error),
+          ms: Date.now() - start,
+        });
         sendText(response, statusCode, publicErrorMessage(error, statusCode));
       } else {
         response.end();
@@ -178,11 +316,15 @@ function startServer() {
     throw new Error('MESSENGER_VERIFY_TOKEN must be set in production.');
   }
 
+  const logger = createConsoleLogger();
   const pool = createPool({ databaseUrl: config.databaseUrl });
   const redis = createRedisClient({ redisUrl: config.redisUrl });
 
   redis.connect().catch((error) => {
-    console.error('Failed to connect to Redis:', error);
+    logger.error({
+      msg: 'redis_connect_failed',
+      error: error.message || String(error),
+    });
   });
 
   const server = createServer({
@@ -192,11 +334,15 @@ function startServer() {
     redis,
     uploadDir: config.uploadDir,
     sessionSecret: config.sessionSecret,
+    logger,
   });
 
   server.listen(config.port, () => {
-    console.log(`ICO Messenger chatbot listening on http://localhost:${config.port}`);
-    console.log(`Webhook path: /webhook`);
+    logger.info({
+      msg: 'server_listening',
+      url: `http://localhost:${config.port}`,
+      webhookPath: '/webhook',
+    });
   });
 
   return server;
