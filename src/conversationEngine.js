@@ -11,6 +11,7 @@ const {
  * @property {string} state Current conversation state.
  * @property {string | null} audience Last matched service audience, when known.
  * @property {string | null} lastServiceId Last selected service id, when known.
+ * @property {string} locale Conversation language, currently "en" or "fil".
  */
 
 /**
@@ -76,6 +77,7 @@ function createInitialSession() {
     state: 'new',
     audience: null,
     lastServiceId: null,
+    locale: 'en',
   };
 }
 
@@ -105,6 +107,34 @@ function servicePayload(service) {
   return `SERVICE_${service.id}`;
 }
 
+const FILIPINO_INPUT_PATTERN =
+  /\b(kumusta|kamusta|po|opo|salamat|paano|saan|kailan|kailangan|serbisyo|magandang|pwede|puwede)\b/i;
+
+function localeForInput(input, currentLocale = 'en') {
+  if (FILIPINO_INPUT_PATTERN.test(input)) return 'fil';
+  return currentLocale === 'fil' ? 'fil' : 'en';
+}
+
+function localizedQuickReplies(locale) {
+  if (locale === 'fil') {
+    return {
+      backToServices: 'Balik serbisyo',
+      backToStart: 'Simula muli',
+      handoff: 'Kausapin ang ICO',
+      internalServices: 'SLSU services',
+      externalServices: 'Partner services',
+    };
+  }
+
+  return {
+    backToServices: 'Back to services',
+    backToStart: 'Back to start',
+    handoff: 'Talk to ICO staff',
+    internalServices: 'Internal services',
+    externalServices: 'External services',
+  };
+}
+
 /**
  * Build a service-list reply for a specific audience.
  *
@@ -112,30 +142,51 @@ function servicePayload(service) {
  * @param {IcoService[]} [services] Service records available to the chatbot.
  * @returns {BotReply}
  */
-function serviceListReply(audience, services = loadServices()) {
+function serviceListReply(audience, services = loadServices(), locale = 'en') {
   const matchingServices = getServicesByAudience(audience, services);
-  const label = audience === 'internal' ? 'internal SLSU unit/office' : 'external partner';
+  const label =
+    locale === 'fil'
+      ? audience === 'internal'
+        ? 'internal na yunit/opisina ng SLSU'
+        : 'external partner'
+      : audience === 'internal'
+        ? 'internal SLSU unit/office'
+        : 'external partner';
   const lines = matchingServices.map((service, index) => `${index + 1}. ${service.service_name}`);
 
   return {
-    text: [
-      `Here are the ICO services for an ${label}:`,
-      '',
-      ...lines,
-      '',
-      'Please choose a service.',
-    ].join('\n'),
+    text:
+      locale === 'fil'
+        ? [
+            `Narito ang mga serbisyo ng ICO para sa ${label}:`,
+            '',
+            ...lines,
+            '',
+            'Pumili po ng serbisyo.',
+          ].join('\n')
+        : [
+            `Here are the ICO services for an ${label}:`,
+            '',
+            ...lines,
+            '',
+            'Please choose a service.',
+          ].join('\n'),
     quickReplies: matchingServices.map((service) =>
       quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
     ),
   };
 }
 
-function serviceListAllReply(services = loadServices()) {
+function serviceListAllReply(services = loadServices(), locale = 'en') {
   const lines = services.map((service, index) => `${index + 1}. ${service.service_name}`);
 
   return {
-    text: ['Here are the ICO services:', '', ...lines, '', 'Please choose a service.'].join('\n'),
+    text:
+      locale === 'fil'
+        ? ['Narito ang mga serbisyo ng ICO:', '', ...lines, '', 'Pumili po ng serbisyo.'].join(
+            '\n',
+          )
+        : ['Here are the ICO services:', '', ...lines, '', 'Please choose a service.'].join('\n'),
     quickReplies: services.map((service) =>
       quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
     ),
@@ -152,33 +203,57 @@ function listItems(items) {
  * @param {IcoService} service Selected service record.
  * @returns {BotReply}
  */
-function serviceGuideReply(service) {
+function serviceGuideReply(service, locale = 'en') {
+  const labels =
+    locale === 'fil'
+      ? {
+          office: 'Opisina/yunit',
+          classification: 'Klasipikasyon',
+          whoMayAvail: 'Sino ang maaaring kumuha',
+          requirements: 'Mga requirement:',
+          reminders: 'Mga paalala sa pagsusumite:',
+          officialLink: 'Opisyal na link',
+          fees: 'Bayarin',
+          processingTime: 'Oras ng proseso',
+        }
+      : {
+          office: 'Office/unit',
+          classification: 'Classification',
+          whoMayAvail: 'Who may avail',
+          requirements: 'Requirements:',
+          reminders: 'Submission reminders:',
+          officialLink: 'Official link',
+          fees: 'Fees',
+          processingTime: 'Processing time',
+        };
+  const replies = localizedQuickReplies(locale);
+
   return {
     text: [
       service.service_name,
       '',
       service.description,
       '',
-      `Office/unit: ${service.office_or_unit}`,
-      `Classification: ${service.classification}`,
-      `Who may avail: ${service.who_may_avail}`,
+      `${labels.office}: ${service.office_or_unit}`,
+      `${labels.classification}: ${service.classification}`,
+      `${labels.whoMayAvail}: ${service.who_may_avail}`,
       '',
-      'Requirements:',
+      labels.requirements,
       listItems(service.requirements),
       '',
-      'Submission reminders:',
+      labels.reminders,
       listItems(service.submission_timeline),
       '',
-      `Official link: ${service.official_link}`,
-      `Fees: ${service.fees}`,
-      `Processing time: ${service.processing_time}`,
+      `${labels.officialLink}: ${service.official_link}`,
+      `${labels.fees}: ${service.fees}`,
+      `${labels.processingTime}: ${service.processing_time}`,
       '',
       service.css_reminder,
     ].join('\n'),
     quickReplies: [
-      quickReply('Back to services', 'BACK_TO_SERVICES'),
-      quickReply('Start over', 'BACK_TO_START'),
-      quickReply('Talk to ICO staff', 'HANDOFF'),
+      quickReply(replies.backToServices, 'BACK_TO_SERVICES'),
+      quickReply(replies.backToStart, 'BACK_TO_START'),
+      quickReply(replies.handoff, 'HANDOFF'),
     ],
   };
 }
@@ -203,32 +278,47 @@ function searchFaqs(query, faqs = []) {
   return scored.map((item) => item.faq);
 }
 
-function faqReply(faq) {
+function faqReply(faq, locale = 'en') {
+  const replies = localizedQuickReplies(locale);
+
   return {
     text: [faq.question, '', faq.answer].join('\n'),
     quickReplies: [
-      quickReply('Back to services', 'BACK_TO_SERVICES'),
-      quickReply('Start over', 'BACK_TO_START'),
-      quickReply('Talk to ICO staff', 'HANDOFF'),
+      quickReply(replies.backToServices, 'BACK_TO_SERVICES'),
+      quickReply(replies.backToStart, 'BACK_TO_START'),
+      quickReply(replies.handoff, 'HANDOFF'),
     ],
   };
 }
 
-function handoffReply() {
+function handoffReply(locale = 'en') {
+  const replies = localizedQuickReplies(locale);
+
   return {
-    text: [
-      "I can only confirm details listed in the ICO Citizen's Charter.",
-      '',
-      'For requests that need staff judgment, exceptions, approvals, or information outside the charter, please contact ICO directly:',
-      '',
-      'Email: reports@slsu.edu.ph',
-      'Website: https://www.slsu.edu.ph',
-      'Facebook: https://www.facebook.com/SLSUOFFICIAL',
-    ].join('\n'),
+    text:
+      locale === 'fil'
+        ? [
+            "Maaari ko lamang kumpirmahin ang mga detalyeng nasa ICO Citizen's Charter.",
+            '',
+            'Para sa mga kahilingang kailangan ng pasya ng staff, exception, approval, o impormasyong wala sa charter, makipag-ugnayan po diretso sa ICO:',
+            '',
+            'Email: reports@slsu.edu.ph',
+            'Website: https://www.slsu.edu.ph',
+            'Facebook: https://www.facebook.com/SLSUOFFICIAL',
+          ].join('\n')
+        : [
+            "I can only confirm details listed in the ICO Citizen's Charter.",
+            '',
+            'For requests that need staff judgment, exceptions, approvals, or information outside the charter, please contact ICO directly:',
+            '',
+            'Email: reports@slsu.edu.ph',
+            'Website: https://www.slsu.edu.ph',
+            'Facebook: https://www.facebook.com/SLSUOFFICIAL',
+          ].join('\n'),
     quickReplies: [
-      quickReply('Back to start', 'BACK_TO_START'),
-      quickReply('Internal services', 'AUDIENCE_INTERNAL'),
-      quickReply('External services', 'AUDIENCE_EXTERNAL'),
+      quickReply(replies.backToStart, 'BACK_TO_START'),
+      quickReply(replies.internalServices, 'AUDIENCE_INTERNAL'),
+      quickReply(replies.externalServices, 'AUDIENCE_EXTERNAL'),
     ],
   };
 }
@@ -263,19 +353,20 @@ function withAnalytics(result, analytics = []) {
 function handleUserMessage(session, message, services = loadServices(), faqs = []) {
   const current = cloneSession(session);
   const input = normalizeMessage(message);
+  const locale = localeForInput(input, current.locale);
 
   if (!input || input === 'BACK_TO_START') {
     return withAnalytics({
-      session: { ...createInitialSession(), state: 'selecting_service' },
-      replies: [serviceListAllReply(services)],
+      session: { ...createInitialSession(), state: 'selecting_service', locale },
+      replies: [serviceListAllReply(services, locale)],
     });
   }
 
   if (input === 'HANDOFF') {
     return withAnalytics(
       {
-        session: { ...current, state: 'handoff' },
-        replies: [handoffReply()],
+        session: { ...current, locale, state: 'handoff' },
+        replies: [handoffReply(locale)],
       },
       [{ name: 'chatbot_handoff', reason: 'requested' }],
     );
@@ -283,8 +374,8 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
 
   if (input === 'BACK_TO_SERVICES' && current.audience) {
     return withAnalytics({
-      session: { ...current, state: 'selecting_service' },
-      replies: [serviceListAllReply(services)],
+      session: { ...current, locale, state: 'selecting_service' },
+      replies: [serviceListAllReply(services, locale)],
     });
   }
 
@@ -294,8 +385,8 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
     if (!service) {
       return withAnalytics(
         {
-          session: { ...current, state: 'handoff' },
-          replies: [handoffReply()],
+          session: { ...current, locale, state: 'handoff' },
+          replies: [handoffReply(locale)],
         },
         [
           { name: 'chatbot_handoff', reason: 'service_not_found' },
@@ -308,11 +399,12 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
       {
         session: {
           ...current,
+          locale,
           audience: service.audience,
           lastServiceId: service.id,
           state: 'viewing_service',
         },
-        replies: [serviceGuideReply(service)],
+        replies: [serviceGuideReply(service, locale)],
       },
       [
         {
@@ -325,10 +417,15 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
     );
   }
 
-  if (input.toLowerCase() === 'hello' || input.toLowerCase() === 'hi') {
+  if (
+    input.toLowerCase() === 'hello' ||
+    input.toLowerCase() === 'hi' ||
+    input.toLowerCase() === 'kumusta po' ||
+    input.toLowerCase() === 'kamusta po'
+  ) {
     return withAnalytics({
-      session: { ...current, state: 'selecting_service' },
-      replies: [serviceListAllReply(services)],
+      session: { ...current, locale, state: 'selecting_service' },
+      replies: [serviceListAllReply(services, locale)],
     });
   }
   // previous audience selection removed: always show services list or match by free text
@@ -339,9 +436,10 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
       {
         session: {
           ...current,
+          locale,
           state: 'viewing_faq',
         },
-        replies: [faqReply(faqMatches[0])],
+        replies: [faqReply(faqMatches[0], locale)],
       },
       [{ name: 'chatbot_faq_answered', question: faqMatches[0].question }],
     );
@@ -354,11 +452,12 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
       {
         session: {
           ...current,
+          locale,
           audience: service.audience,
           lastServiceId: service.id,
           state: 'viewing_service',
         },
-        replies: [serviceGuideReply(service)],
+        replies: [serviceGuideReply(service, locale)],
       },
       [
         {
@@ -373,8 +472,8 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
 
   return withAnalytics(
     {
-      session: { ...current, state: 'handoff' },
-      replies: [handoffReply()],
+      session: { ...current, locale, state: 'handoff' },
+      replies: [handoffReply(locale)],
     },
     [
       { name: 'chatbot_handoff', reason: 'unanswered' },

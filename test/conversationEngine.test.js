@@ -62,6 +62,15 @@ test('uses Messenger-safe quick reply labels for service lists', () => {
   );
 });
 
+test('answers Tagalog greetings with Filipino chatbot copy', () => {
+  const session = createInitialSession();
+  const result = handleUserMessage(session, 'Kumusta po');
+
+  assert.equal(result.session.state, 'selecting_service');
+  assert.match(result.replies[0].text, /Narito ang mga serbisyo ng ICO/);
+  assert.match(result.replies[0].text, /Pumili po ng serbisyo/);
+});
+
 test('answers published FAQs before handing off', () => {
   const session = createInitialSession();
   const faqs = [

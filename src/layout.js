@@ -53,7 +53,7 @@ function pageLayout({ title, body, user = null, activePath = '', notice = '' }) 
     : '<p class="session-user">Public access<span>Account portal</span></p>';
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en-PH">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -91,18 +91,21 @@ function pageLayout({ title, body, user = null, activePath = '', notice = '' }) 
     }
 
     .skip-link {
-      position: absolute;
+      position: fixed;
       left: 12px;
-      top: -48px;
+      top: 12px;
       z-index: 10;
       padding: 8px 10px;
       border-radius: var(--radius);
       color: #fff;
       background: var(--aico-blue);
+      transform: translateY(calc(-100% - 24px));
     }
 
     .skip-link:focus {
-      top: 12px;
+      outline: 3px solid #fff;
+      outline-offset: 2px;
+      transform: translateY(0);
     }
 
     .app-shell {
@@ -428,6 +431,12 @@ function pageLayout({ title, body, user = null, activePath = '', notice = '' }) 
     }
 
     @media (max-width: 760px) {
+      .skip-link:focus {
+        left: 8px;
+        right: 8px;
+        text-align: center;
+      }
+
       .app-shell {
         grid-template-columns: 1fr;
       }
