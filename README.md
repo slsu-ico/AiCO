@@ -12,13 +12,47 @@ Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State Univer
 ## Requirements
 
 - Node.js 24 or newer
-- PostgreSQL 14 or newer
-- Redis 7 or newer
+- Docker Desktop or Docker Engine with Compose for local PostgreSQL and Redis
+- PostgreSQL 14 or newer if you are not using Docker
+- Redis 7 or newer if you are not using Docker
 - A Meta app with Messenger configured
 - A Facebook Page access token
 - A public HTTPS deployment URL for live Messenger testing
 
-## PostgreSQL And Redis
+## PostgreSQL And Redis With Docker
+
+Start local PostgreSQL and Redis services:
+
+```powershell
+npm run docker:up
+```
+
+The Compose stack exposes the same defaults used by the app:
+
+```text
+postgres://postgres:postgres@localhost:5432/aico
+redis://localhost:6379
+```
+
+Stop the local services:
+
+```powershell
+npm run docker:down
+```
+
+Follow container logs when needed:
+
+```powershell
+npm run docker:logs
+```
+
+You can also run the app container with its dependencies:
+
+```powershell
+docker compose up app
+```
+
+## PostgreSQL And Redis Without Docker
 
 Create a PostgreSQL database and make sure Redis is running locally or remotely. The default local URLs are:
 
@@ -56,16 +90,34 @@ Install dependencies:
 npm install
 ```
 
+Start local Postgres and Redis if you are using Docker:
+
+```powershell
+npm run docker:up
+```
+
 Create or update the database schema:
 
 ```powershell
 npm run migrate
 ```
 
+Or run the migration inside the Compose app container:
+
+```powershell
+npm run docker:migrate
+```
+
 Seed the ICO office, bootstrap admin, and initial published Citizen's Charter services:
 
 ```powershell
 npm run seed
+```
+
+Or seed from the Compose app container:
+
+```powershell
+npm run docker:seed
 ```
 
 Start the webhook and admin server:
@@ -124,6 +176,12 @@ To update live chatbot content in the cloud, publish content through the admin p
 
 ## Development
 
+Run the same checks used by CI:
+
+```powershell
+npm run ci
+```
+
 Run all tests:
 
 ```powershell
@@ -135,6 +193,8 @@ Run only the admin route tests:
 ```powershell
 npm test -- test/adminRoutes.test.js
 ```
+
+GitHub Actions runs lint and tests on pushes to `main` and on pull requests.
 
 ## Notes
 

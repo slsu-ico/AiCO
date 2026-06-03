@@ -12,6 +12,48 @@ const { sendMessengerMessage } = require('./messengerApi');
 
 const SERVICE_NAME = 'ico-services-messenger-chatbot';
 
+/**
+ * @typedef {import('node:http').IncomingMessage} IncomingMessage
+ * @typedef {import('node:http').ServerResponse} ServerResponse
+ * @typedef {import('node:http').Server} HttpServer
+ */
+
+/**
+ * @typedef {object} Logger
+ * @property {(entry: Record<string, unknown>) => void} info Write a structured info log.
+ * @property {(entry: Record<string, unknown>) => void} error Write a structured error log.
+ */
+
+/**
+ * @typedef {object} ChatbotAnalyticsEvent
+ * @property {string} name Stable analytics event name.
+ * @property {string} requestId Request id associated with the event.
+ * @property {string} senderId Messenger sender id.
+ * @property {string} [reason] Handoff or failure reason.
+ * @property {string} [question] User question or FAQ question.
+ * @property {string} [serviceId] Matched service id.
+ * @property {string} [serviceName] Matched service display name.
+ * @property {string} [matchType] How the service was matched.
+ */
+
+/**
+ * @typedef {object} RequestHandlerOptions
+ * @property {string} [verifyToken] Messenger webhook verification token.
+ * @property {string} [pageAccessToken] Facebook Page access token for outbound replies.
+ * @property {object} [pool] PostgreSQL pool-like object.
+ * @property {object} [redis] Redis client-like object.
+ * @property {string} [uploadDir] Directory used for uploaded files.
+ * @property {string} [sessionSecret] Secret used to sign admin session cookies.
+ * @property {boolean} [secureCookies] Whether admin cookies must use the Secure flag.
+ * @property {boolean} [csrfProtection] Whether admin POST routes enforce CSRF tokens.
+ * @property {object} [notificationMailer] Optional review decision mailer.
+ * @property {Array<object>} [services] Injected service records for tests or offline runs.
+ * @property {Array<object>} [faqs] Injected FAQ records for tests or offline runs.
+ * @property {Logger} [logger] Structured logger implementation.
+ * @property {(recipientId: string, reply: object) => Promise<void>} [sendMessage] Messenger sender override.
+ * @property {(event: ChatbotAnalyticsEvent) => void} [trackAnalytics] Analytics sink override.
+ */
+
 function sendText(response, statusCode, body) {
   response.writeHead(statusCode, { 'content-type': 'text/plain' });
   response.end(body);
@@ -119,6 +161,12 @@ async function checkReadiness(options) {
 
 const BOT_SESSION_TTL_SECONDS = 60 * 60;
 
+/**
+ * Extract the text or payload from one Messenger webhook event.
+ *
+ * @param {object} event Messenger event payload.
+ * @returns {string}
+ */
 function extractIncomingText(event) {
   if (event.message?.quick_reply?.payload) return event.message.quick_reply.payload;
   if (event.message?.text) return event.message.text;
@@ -126,6 +174,12 @@ function extractIncomingText(event) {
   return '';
 }
 
+/**
+ * Create the HTTP request handler for the webhook, probes, and admin routes.
+ *
+ * @param {RequestHandlerOptions} [options] Runtime dependencies and test overrides.
+ * @returns {(request: IncomingMessage, response: ServerResponse) => Promise<void>}
+ */
 function createRequestHandler(options = {}) {
   const verifyToken = options.verifyToken || 'dev-verify-token';
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
@@ -306,10 +360,21 @@ function createRequestHandler(options = {}) {
   };
 }
 
+/**
+ * Create an HTTP server for the chatbot and admin portal.
+ *
+ * @param {RequestHandlerOptions} [options] Runtime dependencies and test overrides.
+ * @returns {HttpServer}
+ */
 function createServer(options = {}) {
   return http.createServer(createRequestHandler(options));
 }
 
+/**
+ * Start the configured HTTP server and connect runtime dependencies.
+ *
+ * @returns {HttpServer}
+ */
 function startServer() {
   const config = getConfig();
   if (process.env.NODE_ENV === 'production' && config.verifyToken === 'dev-verify-token') {

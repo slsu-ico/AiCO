@@ -6,6 +6,71 @@ const {
   tokenize,
 } = require('./serviceRepository');
 
+/**
+ * @typedef {object} BotSession
+ * @property {string} state Current conversation state.
+ * @property {string | null} audience Last matched service audience, when known.
+ * @property {string | null} lastServiceId Last selected service id, when known.
+ */
+
+/**
+ * @typedef {object} QuickReply
+ * @property {string} title Messenger quick reply label.
+ * @property {string} payload Payload sent back to the webhook when selected.
+ */
+
+/**
+ * @typedef {object} BotReply
+ * @property {string} text Message body sent to the user.
+ * @property {QuickReply[]} [quickReplies] Optional Messenger quick replies.
+ */
+
+/**
+ * @typedef {object} ChatbotAnalyticsEvent
+ * @property {string} name Stable analytics event name.
+ * @property {string} [reason] Handoff or failure reason.
+ * @property {string} [question] User question or matched FAQ question.
+ * @property {string} [serviceId] Matched service id.
+ * @property {string} [serviceName] Matched service display name.
+ * @property {string} [matchType] How the service was matched.
+ */
+
+/**
+ * @typedef {object} ChatbotResult
+ * @property {BotSession} session Updated conversation session.
+ * @property {BotReply[]} replies Replies to send in order.
+ * @property {ChatbotAnalyticsEvent[]} analytics Analytics events emitted by this turn.
+ */
+
+/**
+ * @typedef {object} IcoService
+ * @property {string} id Stable service id.
+ * @property {string} service_name Display name from the Citizen's Charter.
+ * @property {string} description Service description.
+ * @property {string} audience Eligible audience key.
+ * @property {string} office_or_unit Responsible office or unit.
+ * @property {string} classification Service classification.
+ * @property {string} who_may_avail Eligible requester description.
+ * @property {string[]} requirements Required documents or inputs.
+ * @property {string[]} submission_timeline Submission reminders.
+ * @property {string} official_link Official request URL.
+ * @property {string} fees Fee summary.
+ * @property {string} processing_time Processing time summary.
+ * @property {string} css_reminder Customer satisfaction survey reminder.
+ */
+
+/**
+ * @typedef {object} FaqRecord
+ * @property {string} question Published FAQ question.
+ * @property {string} answer Published FAQ answer.
+ * @property {string[]} [keywords] Optional search keywords.
+ */
+
+/**
+ * Create a blank chatbot session.
+ *
+ * @returns {BotSession}
+ */
 function createInitialSession() {
   return {
     state: 'new',
@@ -40,6 +105,13 @@ function servicePayload(service) {
   return `SERVICE_${service.id}`;
 }
 
+/**
+ * Build a service-list reply for a specific audience.
+ *
+ * @param {string} audience Service audience key.
+ * @param {IcoService[]} [services] Service records available to the chatbot.
+ * @returns {BotReply}
+ */
 function serviceListReply(audience, services = loadServices()) {
   const matchingServices = getServicesByAudience(audience, services);
   const label = audience === 'internal' ? 'internal SLSU unit/office' : 'external partner';
@@ -74,6 +146,12 @@ function listItems(items) {
   return items.map((item) => `- ${item}`).join('\n');
 }
 
+/**
+ * Build the detailed service guide reply for a selected service.
+ *
+ * @param {IcoService} service Selected service record.
+ * @returns {BotReply}
+ */
 function serviceGuideReply(service) {
   return {
     text: [
@@ -173,6 +251,15 @@ function withAnalytics(result, analytics = []) {
   };
 }
 
+/**
+ * Advance a chatbot session from one incoming user message.
+ *
+ * @param {Partial<BotSession>} session Existing session state.
+ * @param {string} message Incoming text, quick reply payload, or postback payload.
+ * @param {IcoService[]} [services] Service records available to the chatbot.
+ * @param {FaqRecord[]} [faqs] Published FAQ records available to the chatbot.
+ * @returns {ChatbotResult}
+ */
 function handleUserMessage(session, message, services = loadServices(), faqs = []) {
   const current = cloneSession(session);
   const input = normalizeMessage(message);

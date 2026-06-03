@@ -1,0 +1,13 @@
+.git
+.github
+.vercel
+node_modules
+npm-debug.log
+server.err.log
+server.out.log
+uploads/*
+!uploads/.gitkeep
+.env
+.env.local
+.env.preview.local
+.env.production.local
