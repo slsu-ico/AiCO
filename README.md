@@ -12,6 +12,7 @@ Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State Univer
 ## Requirements
 
 - Node.js 24 or newer
+- pnpm 11 through Corepack
 - Docker Desktop or Docker Engine with Compose for local PostgreSQL and Redis
 - PostgreSQL 14 or newer if you are not using Docker
 - Redis 7 or newer if you are not using Docker
@@ -24,7 +25,7 @@ Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State Univer
 Start local PostgreSQL and Redis services:
 
 ```powershell
-npm run docker:up
+corepack pnpm run docker:up
 ```
 
 The Compose stack exposes the same defaults used by the app:
@@ -37,13 +38,13 @@ redis://localhost:6379
 Stop the local services:
 
 ```powershell
-npm run docker:down
+corepack pnpm run docker:down
 ```
 
 Follow container logs when needed:
 
 ```powershell
-npm run docker:logs
+corepack pnpm run docker:logs
 ```
 
 You can also run the app container with its dependencies:
@@ -82,48 +83,60 @@ Set these values in your shell, process manager, or deployment environment befor
 - `BOOTSTRAP_ADMIN_PASSWORD`: temporary initial admin password used only by the seed command.
 - `AI_FALLBACK_ENABLED`: reserved flag in `.env.example`; the current chatbot path is published-content first.
 
+Production secrets must be stored in HashiCorp Vault, not `.env` files and not Vercel dashboard environment variables. Set only non-secret Vault bootstrap values in the runtime environment:
+
+- `SECRETS_MANAGER_PROVIDER=hashicorp-vault`
+- `VAULT_ADDR`
+- `VAULT_SECRET_PATH`
+- `VAULT_JWT_AUTH_PATH`
+- `VAULT_JWT_ROLE`
+- `VAULT_JWT_FILE` or `VERCEL_OIDC_TOKEN_FILE`
+
+The app fetches Vault values at startup. During rotation it accepts both `MESSENGER_VERIFY_TOKEN_CURRENT` and `MESSENGER_VERIFY_TOKEN_PREVIOUS`.
+
 ## Setup
 
 Install dependencies:
 
 ```powershell
-npm install
+corepack enable
+corepack pnpm install
 ```
 
 Start local Postgres and Redis if you are using Docker:
 
 ```powershell
-npm run docker:up
+corepack pnpm run docker:up
 ```
 
 Create or update the database schema:
 
 ```powershell
-npm run migrate
+corepack pnpm run migrate
 ```
 
 Or run the migration inside the Compose app container:
 
 ```powershell
-npm run docker:migrate
+corepack pnpm run docker:migrate
 ```
 
 Seed the ICO office, bootstrap admin, and initial published Citizen's Charter services:
 
 ```powershell
-npm run seed
+corepack pnpm run seed
 ```
 
 Or seed from the Compose app container:
 
 ```powershell
-npm run docker:seed
+corepack pnpm run docker:seed
 ```
 
 Start the webhook and admin server:
 
 ```powershell
-npm start
+corepack pnpm start
 ```
 
 The Messenger webhook callback path is:
@@ -140,7 +153,7 @@ The admin portal starts at:
 
 ## Bootstrap Admin Warning
 
-Set `BOOTSTRAP_ADMIN_PASSWORD` to a strong temporary value before running `npm run seed`. Sign in with `BOOTSTRAP_ADMIN_EMAIL`, create/approve proper admin accounts as needed, then rotate or disable the bootstrap credential according to your deployment process.
+Set `BOOTSTRAP_ADMIN_PASSWORD` to a strong temporary value before running `corepack pnpm run seed`. Sign in with `BOOTSTRAP_ADMIN_EMAIL`, create/approve proper admin accounts as needed, then rotate or disable the bootstrap credential according to your deployment process.
 
 ## Chatbot Published Content
 
@@ -179,22 +192,40 @@ To update live chatbot content in the cloud, publish content through the admin p
 Run the same checks used by CI:
 
 ```powershell
-npm run ci
+corepack pnpm run ci
 ```
 
 Run all tests:
 
 ```powershell
-npm test
+corepack pnpm test
 ```
 
 Run only the admin route tests:
 
 ```powershell
-npm test -- test/adminRoutes.test.js
+corepack pnpm test -- test/adminRoutes.test.js
 ```
 
 GitHub Actions runs lint and tests on pushes to `main` and on pull requests.
+
+## Secret Rotation
+
+Managed app-owned keys rotate with:
+
+```powershell
+corepack pnpm run secrets:rotate
+```
+
+That command writes a new Vault KV version, triggers redeploy when `VERCEL_DEPLOY_HOOK_URL` is stored in Vault, polls health, and verifies the webhook with the new key. It keeps old and new keys active during the transition window.
+
+After `SECRET_ROTATION_REVOKE_AFTER`, revoke the previous keys with:
+
+```powershell
+corepack pnpm run secrets:finalize
+```
+
+The scheduled workflow in `.github/workflows/secret-rotation.yml` runs rotation every 30 days and finalization hourly. See `docs/superpowers/specs/2026-06-04-managed-secrets-and-dual-key-rotation.md` for the production spec and guardrails.
 
 ## Notes
 

@@ -1,6 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const {
+  loadManagedSecrets,
+  shouldUseManagedSecrets,
+} = require('./secretsManager');
+
 function loadDotEnv(env) {
   const dotenvPath = path.join(__dirname, '..', '.env');
   if (!fs.existsSync(dotenvPath)) return env;
@@ -22,20 +27,45 @@ function loadDotEnv(env) {
   return values;
 }
 
-function getConfig(env = process.env) {
+function compact(values) {
+  return values.filter((value) => typeof value === 'string' && value.length > 0);
+}
+
+function getConfig(env = process.env, managedSecrets = {}) {
   const shouldLoadDotEnv = env === process.env && (env.NODE_ENV || 'development') !== 'production';
-  const loadedEnv = shouldLoadDotEnv ? loadDotEnv(env) : env;
+  const loadedEnv = {
+    ...(shouldLoadDotEnv ? loadDotEnv(env) : env),
+    ...managedSecrets,
+  };
+  const verifyTokens = compact([
+    loadedEnv.MESSENGER_VERIFY_TOKEN_CURRENT || loadedEnv.MESSENGER_VERIFY_TOKEN,
+    loadedEnv.MESSENGER_VERIFY_TOKEN_PREVIOUS,
+  ]);
+  const sessionSecrets = compact([
+    loadedEnv.SESSION_SECRET_CURRENT || loadedEnv.SESSION_SECRET,
+    loadedEnv.SESSION_SECRET_PREVIOUS,
+  ]);
+
   return {
     port: Number(loadedEnv.PORT || 3000),
-    verifyToken: loadedEnv.MESSENGER_VERIFY_TOKEN || 'dev-verify-token',
+    verifyToken: verifyTokens[0] || 'dev-verify-token',
+    ...(verifyTokens.length > 1 ? { verifyTokens } : {}),
     pageAccessToken: loadedEnv.PAGE_ACCESS_TOKEN || '',
     databaseUrl: loadedEnv.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/aico',
     redisUrl: loadedEnv.REDIS_URL || 'redis://localhost:6379',
     uploadDir: loadedEnv.UPLOAD_DIR || 'uploads',
-    sessionSecret: loadedEnv.SESSION_SECRET || 'dev-session-secret-change-me',
+    sessionSecret: sessionSecrets[0] || 'dev-session-secret-change-me',
+    ...(sessionSecrets.length > 1 ? { sessionSecrets } : {}),
     bootstrapAdminEmail: loadedEnv.BOOTSTRAP_ADMIN_EMAIL || 'admin@slsu.edu.ph',
     bootstrapAdminPassword: loadedEnv.BOOTSTRAP_ADMIN_PASSWORD || '',
   };
+}
+
+async function getRuntimeConfig(env = process.env, options = {}) {
+  const managedSecrets = shouldUseManagedSecrets(env)
+    ? await loadManagedSecrets({ env, fetchImpl: options.fetchImpl })
+    : {};
+  return getConfig(env, managedSecrets);
 }
 
 function validateConfig(config) {
@@ -65,5 +95,6 @@ function validateConfig(config) {
 
 module.exports = {
   getConfig,
+  getRuntimeConfig,
   validateConfig,
 };

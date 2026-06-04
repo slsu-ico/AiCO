@@ -14,7 +14,7 @@ if (-not $env:BOOTSTRAP_ADMIN_PASSWORD) {
 
 Write-Host "Using DATABASE_URL=$($env:DATABASE_URL)"
 Write-Host 'Running database migrations...'
-npm run migrate
+corepack pnpm run migrate
 
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'Migration failed.'
@@ -22,7 +22,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Seeding initial data...'
-npm run seed
+corepack pnpm run seed
 
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'Seed failed.'

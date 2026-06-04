@@ -22,7 +22,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Deploying to Vercel production...'
-npx vercel --prod --yes
+corepack pnpm dlx vercel --prod --yes
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'Vercel deployment failed.'
   exit $LASTEXITCODE

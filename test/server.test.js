@@ -52,6 +52,30 @@ test('rejects Messenger webhook verification with the wrong token', async () => 
   }
 });
 
+test('verifies Messenger webhook with current or previous token during rotation', async () => {
+  const server = createServer({
+    verifyTokens: ['current-secret', 'previous-secret'],
+    sendMessage: async () => {},
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const currentResponse = await fetch(
+      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=current-secret&hub.challenge=current`,
+    );
+    const previousResponse = await fetch(
+      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=previous-secret&hub.challenge=previous`,
+    );
+
+    assert.equal(currentResponse.status, 200);
+    assert.equal(await currentResponse.text(), 'current');
+    assert.equal(previousResponse.status, 200);
+    assert.equal(await previousResponse.text(), 'previous');
+  } finally {
+    await close(server);
+  }
+});
+
 test('handles Messenger POST events and sends replies', async () => {
   const sent = [];
   const server = createServer({

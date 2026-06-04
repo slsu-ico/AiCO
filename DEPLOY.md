@@ -5,6 +5,7 @@ This project is a Node.js app that requires PostgreSQL, Redis, and a configured 
 ## Prerequisites
 
 - Node.js 24 or newer
+- pnpm 11 through Corepack
 - PostgreSQL 14 or newer
 - Redis 7 or newer
 - A Meta app with Messenger access enabled
@@ -13,13 +14,13 @@ This project is a Node.js app that requires PostgreSQL, Redis, and a configured 
 
 ## Environment configuration
 
-Copy the example file and populate secrets in a local `.env` file, or set the values directly in your deployment environment.
+For local development only, copy the example file and populate values in a local `.env` file, or set values directly in your shell.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-### Required environment variables
+### Required local values
 
 - `PORT` - HTTP port for the app (default `3000`)
 - `MESSENGER_VERIFY_TOKEN` - webhook verification token used by Messenger
@@ -35,26 +36,58 @@ Copy-Item .env.example .env
 
 - `AI_FALLBACK_ENABLED=false` - reserved flag; current chatbot path uses published content first.
 
+## Production secrets manager
+
+Production secrets must live in HashiCorp Vault KV v2, not in `.env` files and not in Vercel dashboard environment variables.
+
+Set only non-secret bootstrap configuration in the production runtime:
+
+- `SECRETS_MANAGER_PROVIDER=hashicorp-vault`
+- `VAULT_ADDR`
+- `VAULT_SECRET_PATH` such as `secret/data/aico/production`
+- `VAULT_JWT_AUTH_PATH`
+- `VAULT_JWT_ROLE`
+- `VAULT_NAMESPACE` when needed
+- `VAULT_JWT_FILE` or `VERCEL_OIDC_TOKEN_FILE`
+
+The Vault secret should contain:
+
+- `MESSENGER_VERIFY_TOKEN_CURRENT`
+- `MESSENGER_VERIFY_TOKEN_PREVIOUS` during rotation only
+- `PAGE_ACCESS_TOKEN`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `SESSION_SECRET_CURRENT`
+- `SESSION_SECRET_PREVIOUS` during rotation only
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD` only for initial seeding
+- `VERCEL_DEPLOY_HOOK_URL`
+- `ROTATION_HEALTH_URL`
+- `ROTATION_WEBHOOK_VERIFY_URL`
+
+Vault must have audit logging enabled and KV v2 versioning retained. The app role is read-only for the production secret path. The rotation role can read and update only that path.
+
 ## Database setup
 
 Create or update the database schema and seed initial data.
 
 ```powershell
-npm install
-npm run migrate
-npm run seed
+corepack enable
+corepack pnpm install
+corepack pnpm run migrate
+corepack pnpm run seed
 ```
 
 ### Seed command note
 
-`npm run seed` requires `BOOTSTRAP_ADMIN_PASSWORD` to be set. Use a strong temporary password, then rotate or disable the bootstrap credential after initial setup.
+`corepack pnpm run seed` requires `BOOTSTRAP_ADMIN_PASSWORD` to be set. Use a strong temporary password, then rotate or disable the bootstrap credential after initial setup.
 
 ## Running the app
 
 Start the app locally with:
 
 ```powershell
-npm start
+corepack pnpm start
 ```
 
 The admin portal is available at:
@@ -121,21 +154,22 @@ This repo can be deployed on Vercel as a single serverless function with Supabas
 ### Vercel setup
 
 1. Create a Vercel project and connect this repository.
-2. Add the required environment variables in the Vercel dashboard or use the helper script below.
-3. Deploy the project.
+2. Add only non-secret Vault bootstrap values outside the dashboard secret store.
+3. Configure Vercel workload identity/OIDC to let the app authenticate to Vault.
+4. Deploy the project.
 
 The `vercel.json` file rewrites all requests to `api/index.js`, so the admin routes and `/webhook` endpoint work through Vercel serverless functions.
 
-#### Helper script for Vercel env vars
+#### Legacy helper script for Vercel env vars
 
-If you have the production environment values available in your shell, run:
+The legacy helper script remains for non-production trials only. Do not use it for production secrets.
 
 ```powershell
 cd .\scripts
 .\setup-vercel-env.ps1
 ```
 
-If you want to set the environment variables and deploy in one step, use the helper script created in `scripts/deploy-prod.ps1` after you have the required environment values set in your shell.
+If you want to deploy production, use the Vault-backed runtime and redeployment hook described above.
 
 ### Provisioning Supabase + Upstash
 
@@ -159,8 +193,8 @@ $env:DATABASE_URL = 'postgres://...'
 
 ```powershell
 cd ..
-npm run migrate
-npm run seed
+corepack pnpm run migrate
+corepack pnpm run seed
 ```
 
 6. Confirm the required tables exist and the bootstrap admin was created.
@@ -182,7 +216,7 @@ $env:REDIS_URL = 'rediss://...'
 node -e "const { createClient } = require('redis'); const r = createClient({ url: process.env.REDIS_URL }); r.connect().then(()=>console.log('ok')).catch(console.error).finally(()=>r.disconnect())"
 ```
 
-#### Wire the cloud services into Vercel
+#### Store cloud service credentials in Vault
 
 Once you have the values:
 
@@ -196,14 +230,16 @@ $env:BOOTSTRAP_ADMIN_EMAIL = 'admin@slsu.edu.ph'
 $env:BOOTSTRAP_ADMIN_PASSWORD = 'your-temporary-password'
 ```
 
-Then run:
+Write them to Vault KV v2 at `secret/data/aico/production`. Do not add these secret values to Vercel.
+
+Then run deployment with the non-secret Vault bootstrap values available to the runtime.
 
 ```powershell
 cd .\scripts
 .\deploy-prod.ps1
 ```
 
-If you prefer manual Vercel configuration, add these production variables in the Vercel dashboard under Project Settings > Environment Variables.
+Do not add production secret values in the Vercel dashboard under Project Settings > Environment Variables.
 
 #### Notes
 
@@ -242,14 +278,15 @@ cd .\scripts
 This script executes:
 
 ```powershell
-npm run migrate
-npm run seed
+corepack pnpm run migrate
+corepack pnpm run seed
 ```
 
 It uses the current shell environment variables, so make sure `DATABASE_URL` and `BOOTSTRAP_ADMIN_PASSWORD` are set before running.
 
 ## Troubleshooting
 
-- If tests fail locally, use `npm test`.
+- If tests fail locally, use `corepack pnpm test`.
 - If webhook verification fails, check `MESSENGER_VERIFY_TOKEN`.
 - If Redis cache is stale, admin publication and the dashboard refresh action invalidate and warm `published:services` and `published:faqs`.
+- If rotation verification fails, restore the previous Vault KV version, redeploy, and do not run `corepack pnpm run secrets:finalize`.

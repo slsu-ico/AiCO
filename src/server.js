@@ -2,7 +2,7 @@ const http = require('node:http');
 const { URL } = require('node:url');
 
 const { createInitialSession, handleUserMessage } = require('./conversationEngine');
-const { getConfig } = require('./config');
+const { getConfig, getRuntimeConfig, validateConfig } = require('./config');
 const { createAdminRouteHandler } = require('./adminRoutes');
 const { createRedisClient, getJson, setJson } = require('./cache/redis');
 const { createPool } = require('./db/postgres');
@@ -181,7 +181,7 @@ function extractIncomingText(event) {
  * @returns {(request: IncomingMessage, response: ServerResponse) => Promise<void>}
  */
 function createRequestHandler(options = {}) {
-  const verifyToken = options.verifyToken || 'dev-verify-token';
+  const verifyTokens = (options.verifyTokens || [options.verifyToken || 'dev-verify-token']).filter(Boolean);
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
   const hasInjectedFaqs = Object.prototype.hasOwnProperty.call(options, 'faqs');
   const logger = options.logger || createConsoleLogger();
@@ -288,7 +288,7 @@ function createRequestHandler(options = {}) {
         const token = url.searchParams.get('hub.verify_token');
         const challenge = url.searchParams.get('hub.challenge');
 
-        if (mode === 'subscribe' && token === verifyToken) {
+        if (mode === 'subscribe' && verifyTokens.includes(token)) {
           sendText(response, 200, challenge || '');
           return;
         }
@@ -375,11 +375,11 @@ function createServer(options = {}) {
  *
  * @returns {HttpServer}
  */
-function startServer() {
-  const config = getConfig();
+function startServerWithConfig(config) {
   if (process.env.NODE_ENV === 'production' && config.verifyToken === 'dev-verify-token') {
     throw new Error('MESSENGER_VERIFY_TOKEN must be set in production.');
   }
+  validateConfig(config);
 
   const logger = createConsoleLogger();
   const pool = createPool({ databaseUrl: config.databaseUrl });
@@ -394,6 +394,7 @@ function startServer() {
 
   const server = createServer({
     verifyToken: config.verifyToken,
+    verifyTokens: config.verifyTokens,
     pageAccessToken: config.pageAccessToken,
     pool,
     redis,
@@ -413,8 +414,19 @@ function startServer() {
   return server;
 }
 
+function startServer() {
+  return startServerWithConfig(getConfig());
+}
+
+async function startRuntimeServer() {
+  return startServerWithConfig(await getRuntimeConfig());
+}
+
 if (require.main === module) {
-  startServer();
+  startRuntimeServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }
 
 module.exports = {
@@ -422,4 +434,5 @@ module.exports = {
   createServer,
   extractIncomingText,
   startServer,
+  startRuntimeServer,
 };

@@ -42,3 +42,37 @@ test('returns runtime configuration from environment overrides', () => {
     bootstrapAdminPassword: 'SuperSecret123!',
   });
 });
+
+test('maps managed secret values into runtime configuration', () => {
+  const config = getConfig(
+    {
+      PORT: '8080',
+      UPLOAD_DIR: 'custom-uploads',
+    },
+    {
+      MESSENGER_VERIFY_TOKEN_CURRENT: 'verify-current',
+      MESSENGER_VERIFY_TOKEN_PREVIOUS: 'verify-previous',
+      PAGE_ACCESS_TOKEN: 'page-token',
+      DATABASE_URL: 'postgres://user:pass@db.example:5432/prod',
+      REDIS_URL: 'redis://redis.example:6379',
+      SESSION_SECRET_CURRENT: 'session-current',
+      SESSION_SECRET_PREVIOUS: 'session-previous',
+      BOOTSTRAP_ADMIN_EMAIL: 'admin@example.edu',
+      BOOTSTRAP_ADMIN_PASSWORD: 'SuperSecret123!',
+    },
+  );
+
+  assert.deepEqual(config, {
+    port: 8080,
+    verifyToken: 'verify-current',
+    verifyTokens: ['verify-current', 'verify-previous'],
+    pageAccessToken: 'page-token',
+    databaseUrl: 'postgres://user:pass@db.example:5432/prod',
+    redisUrl: 'redis://redis.example:6379',
+    uploadDir: 'custom-uploads',
+    sessionSecret: 'session-current',
+    sessionSecrets: ['session-current', 'session-previous'],
+    bootstrapAdminEmail: 'admin@example.edu',
+    bootstrapAdminPassword: 'SuperSecret123!',
+  });
+});
