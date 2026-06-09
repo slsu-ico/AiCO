@@ -68,6 +68,18 @@ function formatStatus(status) {
     .replace(/_/g, ' ');
 }
 
+function statusClass(status) {
+  return String(status || 'pending')
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/[^a-z0-9-]/g, '-');
+}
+
+function statusBadge(status) {
+  const label = formatStatus(status || 'pending');
+  return `<span class="status-badge status-${escapeHtml(statusClass(status))}"><span class="status-dot"></span>${escapeHtml(label)}</span>`;
+}
+
 function option(value, label, selected) {
   const selectedAttr = selected === value ? ' selected' : '';
   return `<option value="${escapeHtml(value)}"${selectedAttr}>${escapeHtml(label)}</option>`;
@@ -153,39 +165,57 @@ function renderAdminDashboard(user, counts, options = {}) {
     title: 'Admin dashboard',
     activePath: '/admin',
     user,
+    subtitle: 'Overview of pending queues and published chatbot records',
     notice: options.notice,
     body: `
-      <table aria-label="Administrative counts">
-        <thead>
-          <tr>
-            <th>Queue</th>
-            <th>Count</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Pending account requests</td>
-            <td><strong>${escapeHtml(safeCounts.pendingAccountRequests)}</strong></td>
-            <td><a class="button" href="/admin/account-requests">Review requests</a></td>
-          </tr>
-          <tr>
-            <td>Pending content reviews</td>
-            <td><strong>${escapeHtml(safeCounts.pendingContentReviews)}</strong></td>
-            <td><a class="button" href="/admin/reviews">Review content</a></td>
-          </tr>
-          <tr>
-            <td>Published records</td>
-            <td><strong>${escapeHtml(safeCounts.publishedRecords)}</strong></td>
-            <td>
-              <form method="post" action="/admin/cache/refresh">
-                ${csrfInput(user)}
-                <button type="submit">Refresh cache</button>
-              </form>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="metric-grid" aria-label="Administrative counts">
+        <a class="metric-card" href="/admin/account-requests">
+          <span class="metric-label">Pending account requests</span>
+          <strong class="metric-value">${escapeHtml(safeCounts.pendingAccountRequests)}</strong>
+          <span class="metric-action">Review requests</span>
+        </a>
+        <a class="metric-card" href="/admin/reviews">
+          <span class="metric-label">Pending content reviews</span>
+          <strong class="metric-value">${escapeHtml(safeCounts.pendingContentReviews)}</strong>
+          <span class="metric-action">Review content</span>
+        </a>
+        <form class="metric-card metric-card-form" method="post" action="/admin/cache/refresh">
+          ${csrfInput(user)}
+          <span class="metric-label">Published records</span>
+          <strong class="metric-value">${escapeHtml(safeCounts.publishedRecords)}</strong>
+          <span class="metric-action">Available to chatbot</span>
+          <button type="submit">Refresh cache</button>
+        </form>
+      </div>
+      <section class="panel-section">
+        <h2>Operational summary</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Queue</th>
+              <th>Count</th>
+              <th>Next step</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Pending account requests</td>
+              <td><strong>${escapeHtml(safeCounts.pendingAccountRequests)}</strong></td>
+              <td><a href="/admin/account-requests">Review requests</a></td>
+            </tr>
+            <tr>
+              <td>Pending content reviews</td>
+              <td><strong>${escapeHtml(safeCounts.pendingContentReviews)}</strong></td>
+              <td><a href="/admin/reviews">Review content</a></td>
+            </tr>
+            <tr>
+              <td>Published records</td>
+              <td><strong>${escapeHtml(safeCounts.publishedRecords)}</strong></td>
+              <td>Refresh the chatbot cache after publishing changes.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
     `,
   });
 }
@@ -201,7 +231,7 @@ function renderOfficeSubmissionRows(rows) {
     <tr>
       <td>${escapeHtml(submission.title)}</td>
       <td>${escapeHtml(CONTENT_TYPE_LABELS[submission.content_type] || submission.content_type)}</td>
-      <td>${escapeHtml(formatStatus(submission.status))}</td>
+      <td>${statusBadge(submission.status)}</td>
       <td>${escapeHtml(submission.submitted_at || '')}</td>
       <td>${escapeHtml(submission.latest_admin_note || '')}</td>
     </tr>
@@ -268,7 +298,7 @@ function renderAccountRequestRows(rows, user) {
       <td>${escapeHtml(request.email)}</td>
       <td>${escapeHtml(request.requested_office_name || '')}</td>
       <td>${escapeHtml(request.position)}</td>
-      <td>${escapeHtml(request.status)}</td>
+      <td>${statusBadge(request.status)}</td>
       <td><a class="button" href="#request-${escapeHtml(request.id)}">Review</a></td>
     </tr>
   `,
@@ -289,7 +319,7 @@ function renderAccountRequestRows(rows, user) {
           <div><dt>Email</dt><dd>${escapeHtml(request.email)}</dd></div>
           <div><dt>Office</dt><dd>${escapeHtml(request.requested_office_name || '')}</dd></div>
           <div><dt>Position</dt><dd>${escapeHtml(request.position)}</dd></div>
-          <div><dt>Status</dt><dd>${escapeHtml(request.status)}</dd></div>
+          <div><dt>Status</dt><dd>${statusBadge(request.status)}</dd></div>
         </dl>
         <div class="modal-actions">
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/approve">
@@ -633,10 +663,127 @@ function renderUserManagement(users, offices, user, options = {}) {
   });
 }
 
+function renderChatbotDemo(user) {
+  return pageLayout({
+    title: 'AiCO chatbot demo',
+    activePath: '/admin/chatbot-demo',
+    user,
+    subtitle: 'Local simulator for common ICO service questions',
+    body: `
+      <section class="chat-demo-shell" aria-label="AiCO chatbot demo">
+        <div class="chat-demo-header">
+          <div class="chat-demo-avatar">ICO</div>
+          <div>
+            <strong>ICO Services Assistant</strong>
+            <span>Southern Luzon State University</span>
+          </div>
+          <button class="chat-demo-reset" id="chat-demo-reset" type="button">Reset</button>
+        </div>
+        <div class="chat-demo-messages" id="chat-demo-messages" aria-live="polite"></div>
+        <div class="quick-replies" id="chat-demo-quick-replies" aria-label="Suggested questions"></div>
+        <form class="chat-demo-input" id="chat-demo-form">
+          <label class="sr-only" for="chat-demo-input">Message</label>
+          <input id="chat-demo-input" name="message" autocomplete="off" placeholder='Try "I need an AVP" or "request layout design"'>
+          <button type="submit">Send</button>
+        </form>
+      </section>
+      <script src="/admin/chatbot-demo.js" defer></script>
+    `,
+  });
+}
+
+function renderChatbotDemoScript() {
+  return `
+(() => {
+  const messages = document.getElementById('chat-demo-messages');
+  const replies = document.getElementById('chat-demo-quick-replies');
+  const form = document.getElementById('chat-demo-form');
+  const input = document.getElementById('chat-demo-input');
+  const reset = document.getElementById('chat-demo-reset');
+  const quickReplies = [
+    'Request AVP production',
+    'Request layout design',
+    'Social media guidelines',
+    'Processing time',
+  ];
+
+  if (!messages || !replies || !form || !input || !reset) return;
+
+  const responseFor = (text) => {
+    const value = text.toLowerCase();
+    if (value.includes('avp') || value.includes('video')) {
+      return 'For AVP production, prepare the approved request letter, event details, target date, and available reference materials. Processing may take up to 17 working days depending on scope.';
+    }
+    if (value.includes('layout') || value.includes('template') || value.includes('design')) {
+      return 'For layout design requests, submit your content draft, required size, deadline, and office contact person. AiCO can guide you to the ICO templates and requirements.';
+    }
+    if (value.includes('social') || value.includes('posting') || value.includes('guideline')) {
+      return 'For social media posting, use official SLSU templates and prepare caption copy, publication date, and any approved photos or attachments.';
+    }
+    if (value.includes('time') || value.includes('deadline') || value.includes('processing')) {
+      return 'Processing time depends on the service type. AiCO can show the published Citizen Charter record once the service request is selected.';
+    }
+    return 'I can help with ICO service requests, published requirements, processing time, and where to submit supporting details. Try one of the quick replies below.';
+  };
+
+  const appendMessage = (text, sender) => {
+    const row = document.createElement('div');
+    row.className = sender === 'user' ? 'chat-message is-user' : 'chat-message';
+    if (sender !== 'user') {
+      const avatar = document.createElement('div');
+      avatar.className = 'chat-bot-avatar';
+      avatar.textContent = 'AI';
+      row.appendChild(avatar);
+    }
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    messages.appendChild(row);
+    messages.scrollTop = messages.scrollHeight;
+  };
+
+  const send = (text) => {
+    const clean = String(text || '').trim();
+    if (!clean) return;
+    appendMessage(clean, 'user');
+    window.setTimeout(() => appendMessage(responseFor(clean), 'bot'), 140);
+    input.value = '';
+  };
+
+  const renderReplies = () => {
+    replies.textContent = '';
+    quickReplies.forEach((reply) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = reply;
+      button.addEventListener('click', () => send(reply));
+      replies.appendChild(button);
+    });
+  };
+
+  const seed = () => {
+    messages.textContent = '';
+    appendMessage('Hello. I am AiCO, the ICO Services Assistant for Southern Luzon State University. What service do you need help with today?', 'bot');
+    renderReplies();
+  };
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    send(input.value);
+  });
+  reset.addEventListener('click', seed);
+  seed();
+})();
+`;
+}
+
 module.exports = {
   renderAccountRequest,
   renderAccountRequestRows,
   renderAdminDashboard,
+  renderChatbotDemo,
+  renderChatbotDemoScript,
   renderContentHistory,
   renderContentReviewDetail,
   renderContentReviewRows,

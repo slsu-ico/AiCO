@@ -533,6 +533,40 @@ test('admin dashboard shows pending account, pending review, and published count
   }
 });
 
+test('authenticated users can open the chatbot demo without a database query', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('chatbot demo should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/chatbot-demo`, {
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /AiCO chatbot demo/);
+    assert.match(html, /class="chat-demo-shell"/);
+    assert.match(html, /id="chat-demo-messages"/);
+    assert.match(html, /src="\/admin\/chatbot-demo\.js"/);
+
+    const script = await fetch(`${baseUrl}/admin/chatbot-demo.js`, {
+      headers: { cookie },
+    });
+    const scriptBody = await script.text();
+
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type'), /text\/javascript/);
+    assert.match(scriptBody, /Request AVP production/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('admin database errors render a generic internal error page', async () => {
   const redis = new FakeRedis();
   const cookie = await adminCookie(redis);
