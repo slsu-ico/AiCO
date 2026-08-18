@@ -17,7 +17,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     const notice =
@@ -31,7 +36,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     sendHtml(response, 200, renderChatbotDemo(user));
@@ -43,7 +53,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     response.writeHead(200, {
@@ -55,7 +70,12 @@ async function handleDashboardRoutes(context) {
   }
 
   if (pathname === '/admin/cache/refresh') {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {

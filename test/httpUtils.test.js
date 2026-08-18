@@ -3,6 +3,7 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const {
+  DEFAULT_MAX_BODY_BYTES,
   escapeHtml,
   parseUrlEncoded,
   readBody,
@@ -58,6 +59,12 @@ test('readBody collects request chunks as utf8 text', async () => {
   assert.equal(await readBody(createRequest(['first ', 'second'])), 'first second');
 });
 
+test('readBody applies a safe default request size limit', async () => {
+  await assert.rejects(readBody(createRequest([Buffer.alloc(DEFAULT_MAX_BODY_BYTES + 1)])), {
+    statusCode: 413,
+  });
+});
+
 test('readBodyBuffer rejects requests that exceed the configured byte limit', async () => {
   await assert.rejects(
     readBodyBuffer(createRequest(['first ', 'second']), { maxBytes: 10 }),
@@ -74,6 +81,10 @@ test('response helpers write expected status codes and headers', () => {
   sendHtml(html, 201, '<main>AiCO</main>');
   assert.equal(html.statusCode, 201);
   assert.equal(html.headers['content-type'], 'text/html; charset=utf-8');
+  assert.equal(html.headers['cache-control'], 'no-store');
+  assert.equal(html.headers['referrer-policy'], 'no-referrer');
+  assert.equal(html.headers['x-content-type-options'], 'nosniff');
+  assert.equal(html.headers['x-frame-options'], 'DENY');
   assert.equal(html.body, '<main>AiCO</main>');
 
   const redirected = createResponse();

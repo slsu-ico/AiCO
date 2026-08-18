@@ -3,32 +3,62 @@ param(
 )
 
 $required = @(
-  'MESSENGER_VERIFY_TOKEN',
-  'PAGE_ACCESS_TOKEN',
-  'DATABASE_URL',
-  'REDIS_URL',
-  'SESSION_SECRET',
-  'BOOTSTRAP_ADMIN_EMAIL',
-  'BOOTSTRAP_ADMIN_PASSWORD'
+  'VAULT_ADDR',
+  'VAULT_SECRET_PATH',
+  'VAULT_JWT_AUTH_PATH',
+  'VAULT_JWT_ROLE'
 )
 
 $optional = @(
-  'UPLOAD_DIR',
-  'AI_FALLBACK_ENABLED'
+  'VAULT_NAMESPACE'
 )
 
-Write-Host "Configuring Vercel environment variables for scope: $Scope"
+Write-Host "Configuring non-secret Vault bootstrap variables for scope: $Scope"
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$projectLink = Join-Path $repoRoot '.vercel\project.json'
+if (-not (Test-Path -LiteralPath $projectLink)) {
+  Write-Error "Vercel project linkage is missing at $projectLink. Run 'vercel link --scope $Scope' from $repoRoot first."
+  exit 1
+}
+
+$values = [ordered]@{
+  SECRETS_MANAGER_PROVIDER = 'hashicorp-vault'
+}
+$missing = @()
 
 $allVars = $required + $optional
 foreach ($name in $allVars) {
-  $value = [string]($env:$name)
+  $value = [Environment]::GetEnvironmentVariable($name)
   if (-not $value) {
-    Write-Warning "$name is not set in the current shell. Skipping."
+    if ($required -contains $name) {
+      $missing += $name
+    }
     continue
   }
 
-  Write-Host "Adding $name to Vercel production environment..."
-  vercel env add $name production --value "$value" --yes --scope $Scope
+  $values[$name] = $value
 }
 
-Write-Host "Completed Vercel env setup. Verify values with: vercel env list production --scope $Scope"
+if ($missing.Count -gt 0) {
+  Write-Error "Missing required Vault bootstrap variables: $($missing -join ', ')"
+  exit 1
+}
+
+Push-Location $repoRoot
+try {
+  foreach ($entry in $values.GetEnumerator()) {
+    Write-Host "Updating $($entry.Key) in the Vercel production environment..."
+    $entry.Value | corepack pnpm dlx vercel env add $entry.Key production --force --yes --scope $Scope
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "Failed to configure $($entry.Key)."
+      exit $LASTEXITCODE
+    }
+  }
+}
+finally {
+  Pop-Location
+}
+
+Write-Host 'Vault-managed application secrets were not copied to Vercel.'
+Write-Host "Completed bootstrap setup. Verify values with: vercel env ls production --scope $Scope"

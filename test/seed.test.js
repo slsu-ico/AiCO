@@ -47,6 +47,19 @@ test('seedInitialData requires a non-empty bootstrap admin password before openi
   assert.deepEqual(pool.client.calls, []);
 });
 
+test('seedInitialData rejects a weak bootstrap admin password before opening a transaction', async () => {
+  const pool = {
+    connect() {
+      throw new Error('should not connect');
+    },
+  };
+
+  await assert.rejects(
+    seedInitialData(pool, { bootstrapAdminPassword: 'Secret123!' }),
+    /at least 12 characters/i,
+  );
+});
+
 test('seedInitialData inserts ICO office, bootstrap admin, and published service content', async () => {
   let nextItemId = 100;
   let nextVersionId = 500;
@@ -57,7 +70,9 @@ test('seedInitialData inserts ICO office, bootstrap admin, and published service
     if (sqlIncludes(text, 'INSERT INTO offices')) return { rows: [{ id: 10 }] };
     if (sqlIncludes(text, 'SELECT id FROM users')) return { rows: [] };
     if (sqlIncludes(text, 'INSERT INTO users')) return { rows: [{ id: 20 }] };
-    if (text.includes("structured_payload->>'id'")) return { rows: [] };
+    if (sqlIncludes(text, 'SELECT ci.id') && text.includes('published_service_id = $2')) {
+      return { rows: [] };
+    }
     if (sqlIncludes(text, 'INSERT INTO content_items')) return { rows: [{ id: nextItemId++ }] };
     if (sqlIncludes(text, 'INSERT INTO content_versions')) {
       insertedPayloads.push(params[5]);
@@ -69,7 +84,7 @@ test('seedInitialData inserts ICO office, bootstrap admin, and published service
 
   const result = await seedInitialData(pool, {
     bootstrapAdminEmail: 'bootstrap@example.edu',
-    bootstrapAdminPassword: 'Secret123!',
+    bootstrapAdminPassword: 'Secret123!xx',
   });
 
   assert.deepEqual(commandCalls(pool).slice(0, 2), ['connect', 'BEGIN']);
@@ -102,11 +117,12 @@ test('seedInitialData inserts ICO office, bootstrap admin, and published service
   assert.ok(lockCall);
   assert.deepEqual(lockCall.params, ['seed:initial-data']);
 
-  const serviceLookups = pool.client.calls.filter((call) =>
-    call.text.includes("structured_payload->>'id'"),
+  const serviceLookups = pool.client.calls.filter(
+    (call) =>
+      sqlIncludes(call.text, 'SELECT ci.id') && call.text.includes('published_service_id = $2'),
   );
   assert.equal(serviceLookups.length, services.length);
-  assert.ok(serviceLookups.every((call) => call.params[1] === 'citizens_charter_service'));
+  assert.ok(serviceLookups.every((call) => call.params[0] === 'citizens_charter_service'));
 
   const itemInserts = pool.client.calls.filter((call) =>
     sqlIncludes(call.text, 'INSERT INTO content_items'),
@@ -122,8 +138,8 @@ test('seedInitialData skips services that already have a published payload id', 
     if (sqlIncludes(text, 'SELECT pg_advisory_xact_lock')) return { rows: [] };
     if (sqlIncludes(text, 'INSERT INTO offices')) return { rows: [{ id: 10 }] };
     if (sqlIncludes(text, 'SELECT id FROM users')) return { rows: [{ id: 20 }] };
-    if (text.includes("structured_payload->>'id'")) {
-      return params[2] === existingServiceId ? { rows: [{ id: 999 }] } : { rows: [] };
+    if (sqlIncludes(text, 'SELECT ci.id') && text.includes('published_service_id = $2')) {
+      return params[1] === existingServiceId ? { rows: [{ id: 999 }] } : { rows: [] };
     }
     if (sqlIncludes(text, 'INSERT INTO content_items')) return { rows: [{ id: 100 }] };
     if (sqlIncludes(text, 'INSERT INTO content_versions')) return { rows: [{ id: 500 }] };
@@ -133,7 +149,7 @@ test('seedInitialData skips services that already have a published payload id', 
 
   const result = await seedInitialData(pool, {
     bootstrapAdminEmail: 'bootstrap@example.edu',
-    bootstrapAdminPassword: 'Secret123!',
+    bootstrapAdminPassword: 'Secret123!xx',
   });
 
   const versionInserts = pool.client.calls.filter((call) =>
@@ -150,13 +166,15 @@ test('seedInitialData is idempotent when every service already exists', async ()
     if (sqlIncludes(text, 'SELECT pg_advisory_xact_lock')) return { rows: [] };
     if (sqlIncludes(text, 'INSERT INTO offices')) return { rows: [{ id: 10 }] };
     if (sqlIncludes(text, 'SELECT id FROM users')) return { rows: [{ id: 20 }] };
-    if (text.includes("structured_payload->>'id'")) return { rows: [{ id: 999 }] };
+    if (sqlIncludes(text, 'SELECT ci.id') && text.includes('published_service_id = $2')) {
+      return { rows: [{ id: 999 }] };
+    }
     throw new Error(`Unexpected SQL: ${text}`);
   });
 
   const result = await seedInitialData(pool, {
     bootstrapAdminEmail: 'bootstrap@example.edu',
-    bootstrapAdminPassword: 'Secret123!',
+    bootstrapAdminPassword: 'Secret123!xx',
   });
 
   assert.equal(result.servicesSkipped, services.length);
@@ -178,7 +196,9 @@ test('seedInitialData rolls back and releases the client when service import fai
     if (sqlIncludes(text, 'SELECT pg_advisory_xact_lock')) return { rows: [] };
     if (sqlIncludes(text, 'INSERT INTO offices')) return { rows: [{ id: 10 }] };
     if (sqlIncludes(text, 'SELECT id FROM users')) return { rows: [{ id: 20 }] };
-    if (text.includes("structured_payload->>'id'")) return { rows: [] };
+    if (sqlIncludes(text, 'SELECT ci.id') && text.includes('published_service_id = $2')) {
+      return { rows: [] };
+    }
     if (sqlIncludes(text, 'INSERT INTO content_items')) throw failure;
     throw new Error(`Unexpected SQL: ${text}`);
   });
@@ -186,7 +206,7 @@ test('seedInitialData rolls back and releases the client when service import fai
   await assert.rejects(
     seedInitialData(pool, {
       bootstrapAdminEmail: 'bootstrap@example.edu',
-      bootstrapAdminPassword: 'Secret123!',
+      bootstrapAdminPassword: 'Secret123!xx',
     }),
     failure,
   );

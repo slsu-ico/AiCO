@@ -2,6 +2,7 @@ const {
   CONTENT_TYPE_LABELS,
   FIELD_LIMITS,
   LIST_PAGE_SIZE,
+  TEMPORARY_PASSWORD_MIN_LENGTH,
   VALID_CONTENT_TYPES,
   VALID_ROLES,
 } = require('./adminConstants');
@@ -330,7 +331,7 @@ function renderAccountRequestRows(rows, user) {
             <option value="office_user">Office user</option>
             <option value="admin">Admin</option>
           </select>
-          <input name="password" type="password" maxlength="${FIELD_LIMITS.password}" placeholder="Temporary password" required>
+          <input name="password" type="password" minlength="${TEMPORARY_PASSWORD_MIN_LENGTH}" maxlength="${FIELD_LIMITS.password}" autocomplete="new-password" placeholder="Temporary password (${TEMPORARY_PASSWORD_MIN_LENGTH}+ characters)" required>
           <button type="submit">Approve</button>
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/reject">
@@ -396,19 +397,74 @@ function renderNewContentForm({ user, notice = '' }) {
             ${contentTypeOptions()}
           </select>
         </label>
-        ${field('Title', 'title', { required: true, maxlength: FIELD_LIMITS.title })}
-        ${field('Body', 'body', { multiline: true, required: true, maxlength: FIELD_LIMITS.body })}
-        ${field('Requirements', 'requirements', { multiline: true, maxlength: FIELD_LIMITS.requirements })}
-        ${field('Procedure', 'procedure', { multiline: true, maxlength: FIELD_LIMITS.procedure })}
-        ${field('Fees', 'fees', { maxlength: FIELD_LIMITS.fees })}
-        ${field('Processing time', 'processing_time', { maxlength: FIELD_LIMITS.processing_time })}
+        <fieldset data-content-fields="citizens_charter_service">
+          <legend>Citizen's Charter chatbot record</legend>
+          <p>Enter one requirement or submission reminder per line. The service ID is a stable identifier such as <code>internal-layout-request</code>.</p>
+          ${field('Service ID', 'service_id', { required: true, maxlength: FIELD_LIMITS.service_id })}
+          <label>Audience
+            <select id="audience" name="audience" required>
+              <option value="internal">Internal SLSU unit/office</option>
+              <option value="external">External partner</option>
+            </select>
+          </label>
+          ${field('Service name', 'service_name', { required: true, maxlength: FIELD_LIMITS.service_name })}
+          ${field('Description', 'description', { multiline: true, required: true, maxlength: FIELD_LIMITS.description })}
+          ${field('Office or unit', 'office_or_unit', { required: true, maxlength: FIELD_LIMITS.office_or_unit })}
+          ${field('Classification', 'classification', { required: true, maxlength: FIELD_LIMITS.classification })}
+          ${field('Transaction type', 'transaction_type', { maxlength: FIELD_LIMITS.transaction_type })}
+          ${field('Who may avail', 'who_may_avail', { required: true, maxlength: FIELD_LIMITS.who_may_avail })}
+          ${field('Requirements', 'requirements', { multiline: true, required: true, maxlength: FIELD_LIMITS.requirements })}
+          ${field('Submission timeline', 'submission_timeline', { multiline: true, required: true, maxlength: FIELD_LIMITS.submission_timeline })}
+          ${field('Official link', 'official_link', { type: 'url', required: true, maxlength: FIELD_LIMITS.official_link })}
+          ${field('Fees', 'fees', { required: true, maxlength: FIELD_LIMITS.fees })}
+          ${field('Processing time', 'processing_time', { required: true, maxlength: FIELD_LIMITS.processing_time })}
+          ${field('Client Satisfaction Survey reminder', 'css_reminder', { multiline: true, required: true, maxlength: FIELD_LIMITS.css_reminder })}
+        </fieldset>
+        <fieldset data-content-fields="faq" hidden disabled>
+          <legend>FAQ chatbot record</legend>
+          ${field('Question', 'question', { required: true, maxlength: FIELD_LIMITS.question })}
+          ${field('Answer', 'answer', { multiline: true, required: true, maxlength: FIELD_LIMITS.answer })}
+          ${field('Search keywords (comma-separated)', 'keywords', { maxlength: FIELD_LIMITS.keywords })}
+        </fieldset>
+        <fieldset data-content-fields="generic" hidden disabled>
+          <legend>General content</legend>
+          ${field('Title', 'title', { required: true, maxlength: FIELD_LIMITS.title })}
+          ${field('Body', 'body', { multiline: true, required: true, maxlength: FIELD_LIMITS.body })}
+        </fieldset>
         <label>Supporting file
           <input id="attachment" name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
         </label>
         <button type="submit">Submit for review</button>
       </form>
+      <script src="/admin/content-form.js"></script>
     `,
   });
+}
+
+function renderContentFormScript() {
+  return `
+'use strict';
+(() => {
+  const select = document.getElementById('content_type');
+  const groups = document.querySelectorAll('[data-content-fields]');
+  if (!select || groups.length === 0) return;
+
+  const updateFields = () => {
+    const selectedGroup =
+      select.value === 'citizens_charter_service' || select.value === 'faq'
+        ? select.value
+        : 'generic';
+    groups.forEach((group) => {
+      const active = group.dataset.contentFields === selectedGroup;
+      group.hidden = !active;
+      group.disabled = !active;
+    });
+  };
+
+  select.addEventListener('change', updateFields);
+  updateFields();
+})();
+`;
 }
 
 function renderContentReviewRows(rows) {
@@ -596,9 +652,7 @@ function officeOptions(offices, selectedOfficeId) {
 }
 
 function roleOptions(selectedRole) {
-  return [...VALID_ROLES]
-    .map((role) => option(role, formatStatus(role), selectedRole))
-    .join('');
+  return [...VALID_ROLES].map((role) => option(role, formatStatus(role), selectedRole)).join('');
 }
 
 function renderUserManagement(users, offices, user, options = {}) {
@@ -785,6 +839,7 @@ module.exports = {
   renderChatbotDemo,
   renderChatbotDemoScript,
   renderContentHistory,
+  renderContentFormScript,
   renderContentReviewDetail,
   renderContentReviewRows,
   renderFilterBar,

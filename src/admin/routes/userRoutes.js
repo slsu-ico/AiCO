@@ -13,7 +13,12 @@ async function handleUserRoutes(context) {
   const { request, response, url, pathname, services, csrfProtection } = context;
 
   if (pathname === '/admin/users') {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -27,7 +32,12 @@ async function handleUserRoutes(context) {
 
   const userAction = parseUserAction(pathname);
   if (userAction) {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {
@@ -62,6 +72,7 @@ async function handleUserRoutes(context) {
     await handleUserActivation({
       response,
       pool: services.pool,
+      user,
       id: userAction.id,
       active: userAction.action === 'reactivate',
     });

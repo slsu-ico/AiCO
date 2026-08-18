@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 
 const DEFAULT_SECRET_PATH = 'secret/data/aico/production';
 const DEFAULT_TRANSITION_MINUTES = 60;
-const DEFAULT_HEALTH_TIMEOUT_MS = 30000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 function generateManagedSecret(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
@@ -20,12 +20,12 @@ function buildRotationPayload(current, options = {}) {
 
   return {
     ...current,
-    MESSENGER_VERIFY_TOKEN_CURRENT:
-      options.nextMessengerVerifyToken || generateManagedSecret(),
+    MESSENGER_VERIFY_TOKEN_CURRENT: options.nextMessengerVerifyToken || generateManagedSecret(),
     MESSENGER_VERIFY_TOKEN_PREVIOUS:
       current.MESSENGER_VERIFY_TOKEN_CURRENT || current.MESSENGER_VERIFY_TOKEN || '',
     SESSION_SECRET_CURRENT: options.nextSessionSecret || generateManagedSecret(48),
     SESSION_SECRET_PREVIOUS: current.SESSION_SECRET_CURRENT || current.SESSION_SECRET || '',
+    RUNTIME_CONFIG_VERSION: options.nextRuntimeConfigVersion || generateManagedSecret(16),
     SECRET_ROTATION_STARTED_AT: iso(now),
     SECRET_ROTATION_REVOKE_AFTER: iso(revokeAfter),
     SECRET_ROTATION_FINALIZED_AT: '',
@@ -44,6 +44,7 @@ function buildFinalizePayload(current, options = {}) {
     ...current,
     MESSENGER_VERIFY_TOKEN_PREVIOUS: '',
     SESSION_SECRET_PREVIOUS: '',
+    RUNTIME_CONFIG_VERSION: options.nextRuntimeConfigVersion || generateManagedSecret(16),
     SECRET_ROTATION_FINALIZED_AT: iso(now),
   };
 }
@@ -52,6 +53,18 @@ function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function requireRotationAutomation(data) {
+  for (const name of [
+    'VERCEL_DEPLOY_HOOK_URL',
+    'ROTATION_HEALTH_URL',
+    'ROTATION_WEBHOOK_VERIFY_URL',
+  ]) {
+    if (!data[name] && !process.env[name]) {
+      throw new Error(`${name} is required for managed secret rotation.`);
+    }
+  }
 }
 
 async function readFileIfPresent(filePath) {
@@ -80,7 +93,9 @@ async function getVaultToken() {
     }
 
     const result = await response.json();
-    if (!result.auth?.client_token) throw new Error('Vault JWT login did not return a client token.');
+    if (!result.auth?.client_token) {
+      throw new Error('Vault JWT login did not return a client token.');
+    }
     return result.auth.client_token;
   }
 
@@ -130,8 +145,7 @@ async function writeVaultSecret(secretPath, data) {
 async function triggerRedeploy(data) {
   const deployHookUrl = data.VERCEL_DEPLOY_HOOK_URL || process.env.VERCEL_DEPLOY_HOOK_URL;
   if (!deployHookUrl) {
-    console.log('No deploy hook configured; skipping redeploy trigger.');
-    return;
+    throw new Error('VERCEL_DEPLOY_HOOK_URL is required for managed secret rotation.');
   }
 
   const response = await fetch(deployHookUrl, { method: 'POST' });
@@ -141,38 +155,53 @@ async function triggerRedeploy(data) {
   console.log('Redeploy hook accepted.');
 }
 
-async function verifyHealth(data) {
+async function verifyHealth(data, options = {}) {
   const healthUrl = data.ROTATION_HEALTH_URL || process.env.ROTATION_HEALTH_URL;
   if (!healthUrl) {
-    console.log('No ROTATION_HEALTH_URL configured; skipping health check.');
-    return;
+    throw new Error('ROTATION_HEALTH_URL is required for managed secret rotation.');
+  }
+  const expectedVersion = data.RUNTIME_CONFIG_VERSION;
+  if (!expectedVersion) {
+    throw new Error('RUNTIME_CONFIG_VERSION is required for deployment checks.');
   }
 
-  const deadline = Date.now() + Number(process.env.ROTATION_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS);
+  const deadline =
+    Date.now() +
+    Number(
+      options.timeoutMs || process.env.ROTATION_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS,
+    );
+  const fetchImpl = options.fetchImpl || fetch;
+  const sleep =
+    options.sleep ||
+    ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let lastError = '';
 
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(healthUrl, { cache: 'no-store' });
+      const response = await fetchImpl(healthUrl, { cache: 'no-store' });
       if (response.ok) {
-        console.log(`Health check passed: ${healthUrl}`);
-        return;
+        const body = await response.json();
+        if (body.runtimeConfigVersion === expectedVersion) {
+          console.log(`New runtime configuration is live: ${healthUrl}`);
+          return;
+        }
+        lastError = `runtime config version ${body.runtimeConfigVersion || 'missing'}`;
+      } else {
+        lastError = `HTTP ${response.status}`;
       }
-      lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error.message || String(error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await sleep(2000);
   }
 
-  throw new Error(`Health check did not pass before timeout: ${lastError}`);
+  throw new Error(`New runtime configuration did not become live before timeout: ${lastError}`);
 }
 
 async function verifyWebhookToken(data) {
   const webhookUrl = data.ROTATION_WEBHOOK_VERIFY_URL || process.env.ROTATION_WEBHOOK_VERIFY_URL;
   if (!webhookUrl) {
-    console.log('No ROTATION_WEBHOOK_VERIFY_URL configured; skipping webhook token verification.');
-    return;
+    throw new Error('ROTATION_WEBHOOK_VERIFY_URL is required for managed secret rotation.');
   }
 
   const url = new URL(webhookUrl);
@@ -197,19 +226,24 @@ async function main(argv = process.argv.slice(2)) {
     const next = buildRotationPayload(current, {
       transitionMinutes: process.env.SECRET_ROTATION_TRANSITION_MINUTES,
     });
+    requireRotationAutomation(next);
     await writeVaultSecret(secretPath, next);
     await triggerRedeploy(next);
     await verifyHealth(next);
     await verifyWebhookToken(next);
-    console.log(`Rotation promoted new keys. Revoke old keys after ${next.SECRET_ROTATION_REVOKE_AFTER}.`);
+    console.log(
+      `Rotation promoted new keys. Revoke old keys after ${next.SECRET_ROTATION_REVOKE_AFTER}.`,
+    );
     return;
   }
 
   if (command === 'finalize') {
     const next = buildFinalizePayload(current, { force: argv.includes('--force') });
+    requireRotationAutomation(next);
     await writeVaultSecret(secretPath, next);
     await triggerRedeploy(next);
     await verifyHealth(next);
+    await verifyWebhookToken(next);
     console.log('Rotation finalized and previous keys revoked.');
     return;
   }
@@ -229,4 +263,5 @@ module.exports = {
   buildRotationPayload,
   generateManagedSecret,
   main,
+  verifyHealth,
 };

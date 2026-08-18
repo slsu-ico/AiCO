@@ -5,6 +5,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { createSession, hashPassword } = require('../src/auth');
+const { createInitialSession, handleUserMessage } = require('../src/conversationEngine');
+const { loadPublishedServices } = require('../src/publishedContentRepository');
 const { createServer } = require('../src/server');
 
 class FakeRedis {
@@ -145,14 +147,18 @@ function multipartBody(parts, boundary = '----aico-test-boundary') {
 }
 
 async function adminCookie(redis, user = {}) {
-  const session = await createSession(redis, {
-    id: 10,
-    office_id: 1,
-    email: 'admin@slsu.edu.ph',
-    full_name: 'Bootstrap Admin',
-    role: 'admin',
-    ...user,
-  });
+  const session = await createSession(
+    redis,
+    {
+      id: 10,
+      office_id: 1,
+      email: 'admin@slsu.edu.ph',
+      full_name: 'Bootstrap Admin',
+      role: 'admin',
+      ...user,
+    },
+    { sessionSecret: 'test-session-secret' },
+  );
 
   return session.cookieHeader.split(';')[0];
 }
@@ -952,6 +958,10 @@ test('admin approval creates an active user from an account request', async () =
         ],
       };
     }
+    if (sqlIncludes(text, 'FROM users') && sqlIncludes(text, 'lower(email) = lower($1)')) {
+      assert.deepEqual(params, ['juan@slsu.edu.ph']);
+      return { rows: [] };
+    }
     if (sqlIncludes(text, 'INSERT INTO users')) {
       insertedUserParams = params;
       return { rows: [{ id: 88 }] };
@@ -990,6 +1000,79 @@ test('admin approval creates an active user from an account request', async () =
     assert.equal(insertedUserParams[4], 'office_user');
     assert.equal(insertedUserParams[5], true);
     assert.deepEqual(approvedParams, [42, 10, '', 3]);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin account approval enforces the temporary password minimum before querying', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('weak password should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/account-requests/42/approve`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ office_id: '3', role: 'office_user', password: 'TooShort1!' }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(html, /at least 12 characters/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin account approval safely rejects an existing active user with the same email', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM account_requests') && sqlIncludes(text, 'WHERE id = $1')) {
+      return {
+        rows: [
+          {
+            id: 42,
+            full_name: 'Juan Dela Cruz',
+            email: 'Juan@SLSU.edu.ph',
+            status: 'pending',
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, 'FROM users') && sqlIncludes(text, 'lower(email) = lower($1)')) {
+      assert.deepEqual(params, ['Juan@SLSU.edu.ph']);
+      return { rows: [{ id: 88 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/account-requests/42/approve`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ office_id: '3', role: 'office_user', password: 'TempPass123!' }),
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 409);
+    assert.match(html, /active user already exists/i);
+    assert.ok(pool.calls.some((call) => call.text === 'ROLLBACK'));
+    assert.ok(!pool.calls.some((call) => sqlIncludes(call.text, 'INSERT INTO users')));
   } finally {
     await close(server);
   }
@@ -1072,6 +1155,19 @@ test('renders new content form only for authenticated office users', async () =>
     assert.match(html, /citizens_charter_service/);
     assert.match(html, /enctype="multipart\/form-data"/);
     assert.match(html, /name="attachment"/);
+    assert.match(html, /name="service_id"/);
+    assert.match(html, /name="audience"/);
+    assert.match(html, /name="question"/);
+    assert.match(html, /name="answer"/);
+    assert.match(html, /src="\/admin\/content-form\.js"/);
+
+    const scriptResponse = await fetch(`${baseUrl}/admin/content-form.js`, {
+      headers: { cookie },
+    });
+    const script = await scriptResponse.text();
+    assert.equal(scriptResponse.status, 200);
+    assert.match(scriptResponse.headers.get('content-type'), /text\/javascript/);
+    assert.match(script, /data-content-fields/);
   } finally {
     await close(server);
   }
@@ -1145,12 +1241,19 @@ test('office user submits content for their assigned office as pending review', 
     assert.equal(versionParams[3], 'How do I request international documents?');
     assert.equal(versionParams[4], 'Submit the request form and wait for confirmation.');
     assert.deepEqual(versionParams[5], {
-      title: 'How do I request international documents?',
-      body: 'Submit the request form and wait for confirmation.',
-      office_id: 7,
-      content_type: 'faq',
+      question: 'How do I request international documents?',
+      answer: 'Submit the request form and wait for confirmation.',
     });
     assert.equal(versionParams[6], 22);
+
+    const chatbotResult = handleUserMessage(
+      createInitialSession(),
+      'Where do I request international documents?',
+      [],
+      [versionParams[5]],
+    );
+    assert.equal(chatbotResult.session.state, 'viewing_faq');
+    assert.match(chatbotResult.replies[0].text, /Submit the request form/);
   } finally {
     await close(server);
   }
@@ -1184,9 +1287,19 @@ test('office user submits Citizen Charter content with a supporting file attachm
   const multipart = multipartBody([
     { name: 'office_id', value: '7' },
     { name: 'content_type', value: 'citizens_charter_service' },
-    { name: 'title', value: 'Certification Request' },
-    { name: 'body', value: 'Updated Citizen Charter steps for certification requests.' },
-    { name: 'requirements', value: 'Office request letter' },
+    { name: 'service_id', value: 'internal-certification-request' },
+    { name: 'audience', value: 'internal' },
+    { name: 'service_name', value: 'Certification Request' },
+    { name: 'description', value: 'Updated Citizen Charter steps for certification requests.' },
+    { name: 'office_or_unit', value: 'Information and Communications Office' },
+    { name: 'classification', value: 'Simple' },
+    { name: 'who_may_avail', value: 'SLSU offices and units' },
+    { name: 'requirements', value: 'Office request letter\nValid ID' },
+    { name: 'submission_timeline', value: 'Submit at least three working days ahead.' },
+    { name: 'official_link', value: 'https://www.slsu.edu.ph/certification' },
+    { name: 'fees', value: 'None' },
+    { name: 'processing_time', value: 'Three working days' },
+    { name: 'css_reminder', value: 'Complete the Client Satisfaction Survey.' },
     {
       name: 'attachment',
       filename: '../unsafe/Charter Update.pdf',
@@ -1212,6 +1325,21 @@ test('office user submits Citizen Charter content with a supporting file attachm
     assert.equal(versionParams[0], 900);
     assert.equal(versionParams[2], 'pending_review');
     assert.equal(versionParams[3], 'Certification Request');
+    assert.deepEqual(versionParams[5], {
+      id: 'internal-certification-request',
+      audience: 'internal',
+      service_name: 'Certification Request',
+      description: 'Updated Citizen Charter steps for certification requests.',
+      office_or_unit: 'Information and Communications Office',
+      classification: 'Simple',
+      who_may_avail: 'SLSU offices and units',
+      requirements: ['Office request letter', 'Valid ID'],
+      submission_timeline: ['Submit at least three working days ahead.'],
+      official_link: 'https://www.slsu.edu.ph/certification',
+      fees: 'None',
+      processing_time: 'Three working days',
+      css_reminder: 'Complete the Client Satisfaction Survey.',
+    });
     assert.equal(attachmentParams[0], 'content_version');
     assert.equal(attachmentParams[1], 901);
     assert.equal(attachmentParams[2], 'Charter Update.pdf');
@@ -1221,6 +1349,15 @@ test('office user submits Citizen Charter content with a supporting file attachm
     assert.equal(path.dirname(path.resolve(attachmentParams[5])), path.resolve(uploadDir));
     assert.match(path.basename(attachmentParams[5]), /^[0-9a-f-]+-charter-update\.pdf$/);
     assert.equal(await fs.readFile(attachmentParams[5], 'utf8'), '%PDF-1.4 charter update');
+
+    const chatbotResult = handleUserMessage(
+      createInitialSession(),
+      'SERVICE_internal-certification-request',
+      [versionParams[5]],
+    );
+    assert.equal(chatbotResult.session.state, 'viewing_service');
+    assert.match(chatbotResult.replies[0].text, /Office request letter/);
+    assert.match(chatbotResult.replies[0].text, /Three working days/);
   } finally {
     await close(server);
     await fs.rm(uploadDir, { recursive: true, force: true });
@@ -1676,11 +1813,20 @@ test('admin content reviews are paginated and searchable by title or office', as
   }
 });
 
-test('admin approval publishes content, invalidates caches, and warms published records', async () => {
+test('admin approval returns a truthful warning when shared cache refresh fails', async () => {
   const redis = new FakeRedis();
   await redis.set('published:services', 'cached services');
   await redis.set('published:faqs', 'cached faqs');
+  redis.del = async function failDelete(key) {
+    this.delCalls.push(key);
+    throw new Error('Redis is temporarily unavailable');
+  };
   const cookie = await adminCookie(redis);
+  redis.set = async function failPublishedCacheWrite(key, value) {
+    if (key.startsWith('published:')) throw new Error('Redis is temporarily unavailable');
+    this.store.set(key, value);
+    return 'OK';
+  };
   let versionUpdateParams;
   let itemUpdateParams;
   const pool = createFakePool(async (text, params) => {
@@ -1693,6 +1839,10 @@ test('admin approval publishes content, invalidates caches, and warms published 
             id: 55,
             content_item_id: 90,
             status: 'pending_review',
+            title: 'Fresh FAQ',
+            body: 'Published.',
+            structured_payload: { title: 'Fresh FAQ', body: 'Published.' },
+            content_type: 'faq',
           },
         ],
       };
@@ -1724,15 +1874,198 @@ test('admin approval publishes content, invalidates caches, and warms published 
     });
 
     assert.equal(response.status, 303);
-    assert.equal(response.headers.get('location'), '/admin/reviews?notice=approved');
-    assert.deepEqual(versionUpdateParams, [55, 10]);
-    assert.deepEqual(itemUpdateParams, [90, 55]);
-    assert.equal(await redis.get('published:services'), JSON.stringify([{ id: 'fresh-service' }]));
-    assert.equal(
-      await redis.get('published:faqs'),
-      JSON.stringify([{ question: 'Fresh FAQ', answer: 'Published.' }]),
-    );
+    assert.equal(response.headers.get('location'), '/admin/reviews?notice=approved_cache_pending');
+    assert.deepEqual(versionUpdateParams, [
+      55,
+      10,
+      { question: 'Fresh FAQ', answer: 'Published.' },
+    ]);
+    assert.deepEqual(itemUpdateParams, [90, 55, null]);
+    assert.equal(await redis.get('published:services'), 'cached services');
+    assert.equal(await redis.get('published:faqs'), 'cached faqs');
     assert.deepEqual(redis.delCalls, ['published:services', 'published:faqs']);
+  } finally {
+    await close(server);
+  }
+});
+
+test('approved service flows through the repository cache into a chatbot answer', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  let publishedPayload;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return {
+        rows: [
+          {
+            id: 56,
+            content_item_id: 91,
+            status: 'pending_review',
+            title: 'Degree Certification',
+            body: 'Certification support for international use.',
+            content_type: 'citizens_charter_service',
+            structured_payload: {
+              id: 'degree-certification',
+              audience: 'internal',
+              service_name: 'Degree Certification',
+              description: 'Certification support for international use.',
+              office_or_unit: 'International Office',
+              classification: 'Simple',
+              who_may_avail: 'SLSU students and graduates',
+              requirements: ['Office request letter'],
+              submission_timeline: ['Submit the request to the International Office'],
+              official_link: 'https://slsu.edu.ph/international',
+              fees: 'None',
+              processing_time: 'Three working days',
+              css_reminder: 'Complete the Client Satisfaction Survey.',
+            },
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, "SET status = 'published'")) {
+      publishedPayload = params[2];
+      return { rows: [{ id: 56, content_item_id: 91 }] };
+    }
+    if (sqlIncludes(text, 'published_service_id = $3')) {
+      assert.deepEqual(params, [91, 56, 'degree-certification']);
+      return { rows: [{ id: 91 }] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'citizens_charter_service') {
+      return { rows: [{ structured_payload: publishedPayload }] };
+    }
+    if (sqlIncludes(text, 'FROM content_items ci') && params[0] === 'faq') {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/56/approve`, {
+      method: 'POST',
+      headers: { cookie },
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/reviews?notice=approved');
+
+    const services = await loadPublishedServices({ pool, redis });
+    const chatbotResult = handleUserMessage(
+      createInitialSession(),
+      'degree certification',
+      services,
+      [],
+    );
+    assert.equal(chatbotResult.session.state, 'viewing_service');
+    assert.match(chatbotResult.replies[0].text, /Office request letter/);
+    assert.match(chatbotResult.replies[0].text, /Three working days/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin approval refuses malformed chatbot content before publication', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return {
+        rows: [
+          {
+            id: 55,
+            content_item_id: 90,
+            status: 'pending_review',
+            title: 'Incomplete FAQ',
+            body: '',
+            structured_payload: { question: 'Incomplete FAQ' },
+            content_type: 'faq',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/approve`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const body = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.match(body, /FAQ answer is required/);
+    assert.ok(pool.calls.some((call) => call.text === 'ROLLBACK'));
+    assert.ok(!pool.calls.some((call) => sqlIncludes(call.text, "SET status = 'published'")));
+  } finally {
+    await close(server);
+  }
+});
+
+test('admin approval rejects a duplicate published service ID', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
+      return {
+        rows: [
+          {
+            id: 55,
+            content_item_id: 90,
+            status: 'pending_review',
+            title: 'Visa Assistance',
+            body: 'Visa support.',
+            content_type: 'citizens_charter_service',
+            structured_payload: {
+              id: 'visa-assistance',
+              audience: 'internal',
+              service_name: 'Visa Assistance',
+              description: 'Visa support.',
+              office_or_unit: 'International Office',
+              classification: 'Simple',
+              who_may_avail: 'SLSU offices',
+              requirements: ['Request letter'],
+              submission_timeline: ['Submit the request'],
+              official_link: 'https://slsu.edu.ph',
+              fees: 'None',
+              processing_time: 'One day',
+              css_reminder: 'Complete the satisfaction survey.',
+            },
+          },
+        ],
+      };
+    }
+    if (sqlIncludes(text, "SET status = 'published'")) {
+      return { rows: [{ id: 55, content_item_id: 90 }] };
+    }
+    if (sqlIncludes(text, 'published_service_id = $3')) {
+      const error = new Error('duplicate key value violates unique constraint');
+      error.code = '23505';
+      throw error;
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/reviews/55/approve`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+
+    assert.equal(response.status, 409);
+    assert.match(await response.text(), /published service already uses this service ID/i);
+    assert.ok(pool.calls.some((call) => call.text === 'ROLLBACK'));
+    assert.deepEqual(redis.delCalls, []);
   } finally {
     await close(server);
   }
@@ -1750,7 +2083,22 @@ test('admin approval sends a non-blocking decision notification to the submitter
   const pool = createFakePool(async (text, params) => {
     if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
     if (sqlIncludes(text, 'FROM content_versions') && sqlIncludes(text, 'FOR UPDATE')) {
-      return { rows: [{ id: 55, content_item_id: 90, status: 'pending_review' }] };
+      return {
+        rows: [
+          {
+            id: 55,
+            content_item_id: 90,
+            status: 'pending_review',
+            title: 'Scholarship FAQ',
+            body: 'Bring a valid ID.',
+            structured_payload: {
+              question: 'What is required for the scholarship?',
+              answer: 'Bring a valid ID.',
+            },
+            content_type: 'faq',
+          },
+        ],
+      };
     }
     if (sqlIncludes(text, "SET status = 'published'")) {
       return { rows: [{ id: 55, content_item_id: 90 }] };
@@ -2099,6 +2447,34 @@ test('admin can list and update users', async () => {
     });
     assert.equal(assign.status, 303);
     assert.deepEqual(assignmentUpdateParams, [22, 'admin', 7]);
+  } finally {
+    await close(server);
+  }
+});
+
+test('reactivating a duplicate active email returns a conflict instead of a server error', async () => {
+  const redis = new FakeRedis();
+  const cookie = await adminCookie(redis);
+  const pool = createFakePool(async (text) => {
+    if (sqlIncludes(text, 'UPDATE users') && sqlIncludes(text, 'SET active = $2')) {
+      const error = new Error('duplicate key value violates unique constraint');
+      error.code = '23505';
+      throw error;
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/admin/users/22/reactivate`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 409);
+    assert.match(html, /active user already exists with this email address/i);
   } finally {
     await close(server);
   }

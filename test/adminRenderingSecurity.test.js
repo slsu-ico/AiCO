@@ -63,13 +63,17 @@ function createAdminServer({ pool, redis }) {
 }
 
 async function adminCookie(redis) {
-  const session = await createSession(redis, {
-    id: 10,
-    office_id: 1,
-    email: 'admin@slsu.edu.ph',
-    full_name: 'Bootstrap Admin',
-    role: 'admin',
-  });
+  const session = await createSession(
+    redis,
+    {
+      id: 10,
+      office_id: 1,
+      email: 'admin@slsu.edu.ph',
+      full_name: 'Bootstrap Admin',
+      role: 'admin',
+    },
+    { sessionSecret: 'test-session-secret' },
+  );
 
   return session.cookieHeader.split(';')[0];
 }

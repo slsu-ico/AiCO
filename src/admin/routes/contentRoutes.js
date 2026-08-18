@@ -1,5 +1,5 @@
 const { methodNotAllowed, sendHtml } = require('../../httpUtils');
-const { renderNewContentForm } = require('../../adminViews');
+const { renderContentFormScript, renderNewContentForm } = require('../../adminViews');
 const {
   handleAttachmentMetadataCreate,
   handleContentApprove,
@@ -23,7 +23,12 @@ async function handleContentRoutes(context) {
   const { request, response, url, pathname, services, csrfProtection } = context;
 
   if (pathname === '/admin/submissions') {
-    const user = await requireOfficeUser({ request, response, redis: services.redis });
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -41,7 +46,12 @@ async function handleContentRoutes(context) {
   }
 
   if (pathname === '/admin/content/new') {
-    const user = await requireOfficeUser({ request, response, redis: services.redis });
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -57,8 +67,35 @@ async function handleContentRoutes(context) {
     return true;
   }
 
+  if (pathname === '/admin/content-form.js') {
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
+    if (!user) return true;
+
+    if (request.method !== 'GET') {
+      methodNotAllowed(response, ['GET']);
+      return true;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    response.end(renderContentFormScript());
+    return true;
+  }
+
   if (pathname === '/admin/content') {
-    const user = await requireOfficeUser({ request, response, redis: services.redis });
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {
@@ -79,7 +116,12 @@ async function handleContentRoutes(context) {
 
   const contentHistoryId = parseContentHistory(pathname);
   if (contentHistoryId !== null) {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -97,7 +139,12 @@ async function handleContentRoutes(context) {
   }
 
   if (pathname === '/admin/attachments') {
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {
@@ -119,7 +166,12 @@ async function handleContentRoutes(context) {
   }
 
   if (pathname === '/admin/reviews') {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -133,7 +185,12 @@ async function handleContentRoutes(context) {
 
   const contentReviewId = parseContentReviewDetail(pathname);
   if (contentReviewId !== null) {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -153,7 +210,12 @@ async function handleContentRoutes(context) {
 
   const contentReviewAction = parseContentReviewAction(pathname);
   if (contentReviewAction) {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {

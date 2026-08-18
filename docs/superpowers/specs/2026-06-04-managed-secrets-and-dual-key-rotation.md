@@ -12,7 +12,7 @@ The app may keep non-secret bootstrap configuration in the runtime environment:
 - `VAULT_JWT_AUTH_PATH`
 - `VAULT_JWT_ROLE`
 - `VAULT_NAMESPACE` when the Vault cluster uses namespaces
-- `VAULT_JWT_FILE` or `VERCEL_OIDC_TOKEN_FILE` for workload identity
+- `VAULT_JWT_FILE` for local or CI file-based workload identity. Vercel Functions instead receive a request-scoped `x-vercel-oidc-token` header, which the API entrypoint passes directly to Vault authentication.
 
 Secret values are fetched from Vault at runtime.
 
@@ -23,6 +23,7 @@ Store the production secret at `secret/data/aico/production` unless `VAULT_SECRE
 Required fields:
 
 - `MESSENGER_VERIFY_TOKEN_CURRENT`
+- `MESSENGER_APP_SECRET`
 - `PAGE_ACCESS_TOKEN`
 - `DATABASE_URL`
 - `REDIS_URL`
@@ -35,6 +36,7 @@ Rotation fields:
 - `SECRET_ROTATION_STARTED_AT`
 - `SECRET_ROTATION_REVOKE_AFTER`
 - `SECRET_ROTATION_FINALIZED_AT`
+- `RUNTIME_CONFIG_VERSION` (generated on every rotate/finalize operation)
 
 Automation fields:
 
@@ -44,7 +46,7 @@ Automation fields:
 
 ## Runtime Behavior
 
-1. Serverless and direct server entrypoints call `getRuntimeConfig()`.
+1. Serverless and direct server entrypoints call `getRuntimeConfig()`; the Vercel entrypoint includes the request-scoped OIDC token.
 2. When `SECRETS_MANAGER_PROVIDER=hashicorp-vault`, the app authenticates to Vault using JWT/OIDC auth or a token file.
 3. Managed secrets override process environment values.
 4. During a rotation window, `MESSENGER_VERIFY_TOKEN_CURRENT` and `MESSENGER_VERIFY_TOKEN_PREVIOUS` are both accepted.
@@ -59,7 +61,7 @@ Run `corepack pnpm run secrets:rotate` every 30 days.
 3. Promote old current values into the previous slots.
 4. Store the new current values in Vault, creating a new KV version.
 5. Trigger redeployment via the deploy hook stored in Vault.
-6. Poll `ROTATION_HEALTH_URL`.
+6. Poll `ROTATION_HEALTH_URL` until it serves the newly generated `RUNTIME_CONFIG_VERSION`.
 7. Verify the deployed webhook accepts `MESSENGER_VERIFY_TOKEN_CURRENT`.
 8. Leave current and previous keys active until `SECRET_ROTATION_REVOKE_AFTER`.
 

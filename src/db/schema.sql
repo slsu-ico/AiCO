@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS content_items (
   office_id bigint NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
   content_type text NOT NULL CHECK (content_type IN ('citizens_charter_service', 'faq', 'event', 'project', 'program', 'activity')),
   current_published_version_id bigint,
+  published_service_id text,
   active boolean NOT NULL DEFAULT true,
   created_by bigint REFERENCES users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -83,6 +84,109 @@ BEGIN
 END
 $$;
 
+ALTER TABLE content_items
+  ADD COLUMN IF NOT EXISTS published_service_id text;
+
+UPDATE content_items ci
+SET published_service_id = lower(trim(coalesce(
+  cv.structured_payload->>'id',
+  cv.structured_payload->>'service_id'
+)))
+FROM content_versions cv
+WHERE cv.id = ci.current_published_version_id
+  AND ci.content_type = 'citizens_charter_service'
+  AND nullif(trim(coalesce(
+    cv.structured_payload->>'id',
+    cv.structured_payload->>'service_id'
+  )), '') IS NOT NULL
+  AND ci.published_service_id IS DISTINCT FROM lower(trim(coalesce(
+    cv.structured_payload->>'id',
+    cv.structured_payload->>'service_id'
+  )));
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM content_items ci
+    JOIN content_versions cv ON cv.id = ci.current_published_version_id
+    WHERE ci.active = true
+      AND cv.status = 'published'
+      AND (
+        (
+          ci.content_type = 'citizens_charter_service'
+          AND (
+            lower(trim(coalesce(cv.structured_payload->>'id', cv.structured_payload->>'service_id', '')))
+              !~ '^[a-z0-9]+(-[a-z0-9]+)*$'
+            OR lower(coalesce(cv.structured_payload->>'audience', '')) NOT IN ('internal', 'external')
+            OR nullif(trim(coalesce(
+              cv.structured_payload->>'service_name',
+              cv.structured_payload->>'title'
+            )), '') IS NULL
+            OR nullif(trim(coalesce(
+              cv.structured_payload->>'description',
+              cv.structured_payload->>'body'
+            )), '') IS NULL
+            OR nullif(trim(cv.structured_payload->>'office_or_unit'), '') IS NULL
+            OR nullif(trim(cv.structured_payload->>'classification'), '') IS NULL
+            OR nullif(trim(cv.structured_payload->>'who_may_avail'), '') IS NULL
+            OR trim(coalesce(cv.structured_payload->>'official_link', ''))
+              !~* '^https?://[^[:space:]]+$'
+            OR nullif(trim(cv.structured_payload->>'fees'), '') IS NULL
+            OR nullif(trim(cv.structured_payload->>'processing_time'), '') IS NULL
+            OR nullif(trim(cv.structured_payload->>'css_reminder'), '') IS NULL
+            OR NOT coalesce(
+              CASE
+                WHEN jsonb_typeof(cv.structured_payload->'requirements') = 'array'
+                  THEN EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(cv.structured_payload->'requirements') AS item(value)
+                    WHERE nullif(trim(item.value), '') IS NOT NULL
+                  )
+                ELSE nullif(trim(cv.structured_payload->>'requirements'), '') IS NOT NULL
+              END,
+              false
+            )
+            OR NOT coalesce(
+              CASE
+                WHEN jsonb_typeof(cv.structured_payload->'submission_timeline') = 'array'
+                  THEN EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                      cv.structured_payload->'submission_timeline'
+                    ) AS item(value)
+                    WHERE nullif(trim(item.value), '') IS NOT NULL
+                  )
+                ELSE nullif(trim(coalesce(
+                  cv.structured_payload->>'submission_timeline',
+                  cv.structured_payload->>'procedure'
+                )), '') IS NOT NULL
+              END,
+              false
+            )
+          )
+        )
+        OR (
+          ci.content_type = 'faq'
+          AND (
+            nullif(trim(coalesce(
+              cv.structured_payload->>'question',
+              cv.structured_payload->>'title'
+            )), '') IS NULL
+            OR nullif(trim(coalesce(
+              cv.structured_payload->>'answer',
+              cv.structured_payload->>'body'
+            )), '') IS NULL
+          )
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'Published chatbot content does not satisfy the canonical payload contract.'
+      USING HINT = 'Audit and backfill legacy service/FAQ payloads before rerunning the migration.';
+  END IF;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS review_notes (
   id BIGSERIAL PRIMARY KEY,
   content_version_id bigint NOT NULL REFERENCES content_versions(id) ON DELETE CASCADE,
@@ -106,7 +210,42 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE INDEX IF NOT EXISTS idx_account_requests_status ON account_requests(status);
 CREATE INDEX IF NOT EXISTS idx_users_email_active ON users(email) WHERE active = true;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM users
+    WHERE active = true
+    GROUP BY lower(email)
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Cannot add active-user email uniqueness: case-insensitive duplicates exist.'
+      USING HINT = 'Deactivate or merge duplicate active users, then rerun the migration.';
+  END IF;
+END
+$$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_active_unique
+  ON users(lower(email))
+  WHERE active = true;
 CREATE INDEX IF NOT EXISTS idx_content_items_office_type ON content_items(office_id, content_type);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM content_items
+    WHERE active = true
+      AND published_service_id IS NOT NULL
+    GROUP BY published_service_id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Cannot add published service ID uniqueness: duplicate IDs exist.'
+      USING HINT = 'Assign unique IDs to duplicate published services, then rerun the migration.';
+  END IF;
+END
+$$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_content_items_published_service_id_unique
+  ON content_items(published_service_id)
+  WHERE active = true AND published_service_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_content_versions_status ON content_versions(status);
 CREATE INDEX IF NOT EXISTS idx_content_versions_item_status ON content_versions(content_item_id, status);
 CREATE INDEX IF NOT EXISTS idx_content_versions_published ON content_versions(published_at DESC, id DESC) WHERE status = 'published';

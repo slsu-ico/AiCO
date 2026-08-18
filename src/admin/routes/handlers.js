@@ -3,11 +3,17 @@ const {
   FIELD_LABELS,
   FIELD_LIMITS,
   LIST_PAGE_SIZE,
+  TEMPORARY_PASSWORD_MIN_LENGTH,
   VALID_ATTACHMENT_LINKED_TYPES,
   VALID_CONTENT_TYPES,
   VALID_ROLES,
 } = require('../../adminConstants');
-const { likePattern, listStateFromUrl, noticeText, totalFromRows } = require('../../adminListState');
+const {
+  likePattern,
+  listStateFromUrl,
+  noticeText,
+  totalFromRows,
+} = require('../../adminListState');
 const { readMultipartForm } = require('../../adminMultipart');
 const {
   renderAccountRequest,
@@ -22,13 +28,10 @@ const {
   renderPagination,
   renderUserManagement,
 } = require('../../adminViews');
-const {
-  createSession,
-  getSession,
-  hashPassword,
-  verifyPassword,
-} = require('../../auth');
+const { createSession, getSession, hashPassword, verifyPassword } = require('../../auth');
+const { deleteKey } = require('../../cache/redis');
 const { withTransaction } = require('../../db/postgres');
+const { normalizeContentPayload } = require('../../contentPayload');
 const {
   escapeHtml,
   notFound,
@@ -146,8 +149,8 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-async function currentSession(redis, request) {
-  return getSession(redis, request.headers.cookie || '');
+async function currentSession(redis, request, sessionSecrets) {
+  return getSession(redis, request.headers.cookie || '', { sessionSecrets });
 }
 
 function getClientIp(request) {
@@ -192,7 +195,7 @@ function renderTooManyLoginAttempts(response) {
   );
 }
 
-async function handleLoginPost({ request, response, pool, redis, secureCookies }) {
+async function handleLoginPost({ request, response, pool, redis, secureCookies, sessionSecrets }) {
   const form = await readForm(request);
   const email = clean(form.email).toLowerCase();
   const password = String(form.password ?? '');
@@ -237,7 +240,7 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
       name: user.full_name,
       role: user.role,
     },
-    { secure: secureCookies },
+    { secure: secureCookies, sessionSecrets },
   );
 
   response.writeHead(303, {
@@ -309,8 +312,8 @@ async function handleRequestAccountPost({ request, response, pool }) {
   redirect(response, '/request-account?submitted=1');
 }
 
-async function requireAdmin({ request, response, redis }) {
-  const session = await currentSession(redis, request);
+async function requireAdmin({ request, response, redis, sessionSecrets }) {
+  const session = await currentSession(redis, request, sessionSecrets);
   if (!session?.user) {
     redirect(response, '/login');
     return null;
@@ -552,22 +555,50 @@ async function handleAccountRequestsIndex({ response, pool, user, url }) {
   );
 }
 
+function contentTitleAndBody(form, contentType) {
+  if (contentType === 'citizens_charter_service') {
+    return {
+      title: clean(form.service_name || form.title),
+      body: clean(form.description || form.body),
+    };
+  }
+
+  if (contentType === 'faq') {
+    return {
+      title: clean(form.question || form.title),
+      body: clean(form.answer || form.body),
+    };
+  }
+
+  return {
+    title: clean(form.title),
+    body: clean(form.body),
+  };
+}
+
+function renderConflict(response, message, user = null) {
+  sendHtml(
+    response,
+    409,
+    pageLayout({
+      title: 'Conflict',
+      user,
+      body: `<p>${escapeHtml(message)}</p>`,
+    }),
+  );
+}
+
 function buildContentPayload({ form, user, contentType, title, body }) {
-  const payload = {
+  if (contentType === 'citizens_charter_service' || contentType === 'faq') {
+    return normalizeContentPayload(contentType, { ...form, title, body });
+  }
+
+  return {
     title,
     body,
     office_id: Number(user.office_id),
     content_type: contentType,
   };
-
-  if (contentType === 'citizens_charter_service') {
-    for (const key of ['requirements', 'procedure', 'fees', 'processing_time', 'service_name']) {
-      const value = clean(form[key]);
-      if (value) payload[key] = value;
-    }
-  }
-
-  return payload;
 }
 
 async function handleContentSubmit({ request, response, pool, user, uploadDir, csrfProtection }) {
@@ -585,11 +616,23 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
   const lengthError = validateFieldLengths(form, [
     'title',
     'body',
+    'service_id',
+    'description',
+    'office_or_unit',
+    'classification',
+    'transaction_type',
+    'who_may_avail',
     'requirements',
+    'submission_timeline',
     'procedure',
+    'official_link',
     'fees',
     'processing_time',
     'service_name',
+    'css_reminder',
+    'question',
+    'answer',
+    'keywords',
   ]);
   if (lengthError) {
     renderBadRequest(response, lengthError, user);
@@ -600,8 +643,6 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
   const officeId = Number(user.office_id);
   const requestedOfficeId = clean(form.office_id);
   const contentType = clean(form.content_type);
-  const title = clean(form.title);
-  const body = clean(form.body);
 
   if (!Number.isInteger(officeId) || officeId < 1) {
     renderForbidden(response, user, 'Content can only be submitted for an assigned office.');
@@ -618,8 +659,16 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     return;
   }
 
+  const { title, body } = contentTitleAndBody(form, contentType);
+
   if (!title || !body) {
-    renderBadRequest(response, 'Title and body are required.', user);
+    const message =
+      contentType === 'faq'
+        ? 'FAQ question and answer are required.'
+        : contentType === 'citizens_charter_service'
+          ? 'Service name and description are required.'
+          : 'Title and body are required.';
+    renderBadRequest(response, message, user);
     return;
   }
 
@@ -628,7 +677,16 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     return;
   }
 
-  const payload = buildContentPayload({ form, user, contentType, title, body });
+  let payload;
+  try {
+    payload = buildContentPayload({ form, user, contentType, title, body });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      renderBadRequest(response, error.message, user);
+      return;
+    }
+    throw error;
+  }
 
   await withTransaction(pool, async (client) => {
     const itemResult = await client.query(
@@ -834,6 +892,8 @@ async function handleContentReviewsIndex({ response, pool, user, url }) {
   const offsetParam = params.length;
   const notice = noticeText(state.notice, {
     approved: 'Content approved and published.',
+    approved_cache_pending:
+      'Content approved and published, but the shared chatbot cache could not be refreshed. Retry the cache refresh action.',
     rejected: 'Content rejected.',
     needs_revision: 'Content returned for revision.',
   });
@@ -1052,17 +1112,25 @@ async function handleUsersIndex({ response, pool, user, url }) {
   );
 }
 
-async function handleUserActivation({ response, pool, id, active }) {
-  await pool.query(
-    `
-      UPDATE users
-      SET active = $2,
-          updated_at = now()
-      WHERE id = $1
-      RETURNING id
-    `,
-    [id, active],
-  );
+async function handleUserActivation({ response, pool, user, id, active }) {
+  try {
+    await pool.query(
+      `
+        UPDATE users
+        SET active = $2,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [id, active],
+    );
+  } catch (error) {
+    if (active && error.code === '23505') {
+      renderConflict(response, 'An active user already exists with this email address.', user);
+      return;
+    }
+    throw error;
+  }
 
   redirect(response, `/admin/users?notice=${active ? 'reactivated' : 'deactivated'}`);
 }
@@ -1102,9 +1170,16 @@ async function handleUserAssignment({ request, response, pool, user, id, csrfPro
 async function lockContentVersion(client, id) {
   const result = await client.query(
     `
-      SELECT id, content_item_id, status
-      FROM content_versions
-      WHERE id = $1
+      SELECT cv.id,
+             cv.content_item_id,
+             cv.status,
+             cv.title,
+             cv.body,
+             cv.structured_payload,
+             ci.content_type
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      WHERE cv.id = $1
       FOR UPDATE
     `,
     [id],
@@ -1126,9 +1201,25 @@ async function lockContentVersion(client, id) {
   return version;
 }
 
+function payloadForPublication(version) {
+  const payload =
+    version.structured_payload && typeof version.structured_payload === 'object'
+      ? version.structured_payload
+      : {};
+
+  if (version.content_type !== 'citizens_charter_service' && version.content_type !== 'faq') {
+    return payload;
+  }
+
+  return normalizeContentPayload(version.content_type, {
+    ...payload,
+    title: payload.title || version.title,
+    body: payload.body || version.body,
+  });
+}
+
 async function invalidatePublishedCache(redis) {
-  await redis.del('published:services');
-  await redis.del('published:faqs');
+  await Promise.all([deleteKey(redis, 'published:services'), deleteKey(redis, 'published:faqs')]);
 }
 
 async function handleCacheRefresh({ response, pool, redis }) {
@@ -1138,44 +1229,67 @@ async function handleCacheRefresh({ response, pool, redis }) {
 }
 
 async function handleContentApprove({ response, pool, redis, user, id, notificationMailer }) {
-  await withTransaction(pool, async (client) => {
-    const version = await lockContentVersion(client, id);
+  try {
+    await withTransaction(pool, async (client) => {
+      const version = await lockContentVersion(client, id);
+      const payload = payloadForPublication(version);
 
-    await client.query(
-      `
-        UPDATE content_versions
-        SET status = 'published',
-            reviewed_by = $2,
-            reviewed_at = now(),
-            published_at = now(),
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id, content_item_id
-      `,
-      [id, user.id],
-    );
+      await client.query(
+        `
+          UPDATE content_versions
+          SET status = 'published',
+              reviewed_by = $2,
+              structured_payload = $3,
+              reviewed_at = now(),
+              published_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id, content_item_id
+        `,
+        [id, user.id, payload],
+      );
 
-    await client.query(
-      `
-        UPDATE content_items
-        SET current_published_version_id = $2,
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [version.content_item_id, id],
-    );
-  });
+      await client.query(
+        `
+          UPDATE content_items
+          SET current_published_version_id = $2,
+              published_service_id = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id
+        `,
+        [
+          version.content_item_id,
+          id,
+          version.content_type === 'citizens_charter_service' ? payload.id : null,
+        ],
+      );
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      error.statusCode = 409;
+      error.message = 'A published service already uses this service ID.';
+    }
+    throw error;
+  }
 
-  await invalidatePublishedCache(redis);
-  await warmPublishedContentCache({ pool, redis });
+  let cacheRefreshPending = false;
+  try {
+    await invalidatePublishedCache(redis);
+    await warmPublishedContentCache({ pool, redis });
+  } catch {
+    cacheRefreshPending = true;
+  }
   await notifyContentReviewDecision({
     notificationMailer,
     pool,
     id,
     status: 'published',
   });
-  redirect(response, '/admin/reviews?notice=approved');
+  redirect(
+    response,
+    `/admin/reviews?notice=${cacheRefreshPending ? 'approved_cache_pending' : 'approved'}`,
+  );
 }
 
 async function handleContentReviewStatus({
@@ -1307,61 +1421,94 @@ async function handleApprove({ request, response, pool, user, id, csrfProtection
     return;
   }
 
-  await withTransaction(pool, async (client) => {
-    const requestResult = await client.query(
-      `
-        SELECT id, full_name, email, status
-        FROM account_requests
-        WHERE id = $1
-        FOR UPDATE
-      `,
-      [id],
+  if (password.length < TEMPORARY_PASSWORD_MIN_LENGTH) {
+    renderBadRequest(
+      response,
+      `Temporary password must be at least ${TEMPORARY_PASSWORD_MIN_LENGTH} characters.`,
+      user,
     );
-    const accountRequest = requestResult.rows[0];
+    return;
+  }
 
-    if (!accountRequest) {
-      const error = new Error('Account request not found.');
-      error.statusCode = 404;
-      throw error;
+  try {
+    await withTransaction(pool, async (client) => {
+      const requestResult = await client.query(
+        `
+          SELECT id, full_name, email, status
+          FROM account_requests
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [id],
+      );
+      const accountRequest = requestResult.rows[0];
+
+      if (!accountRequest) {
+        const error = new Error('Account request not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (accountRequest.status !== 'pending') {
+        const error = new Error('Only pending account requests can be approved.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const existingUser = await client.query(
+        `
+          SELECT id
+          FROM users
+          WHERE active = true
+            AND lower(email) = lower($1)
+          LIMIT 1
+        `,
+        [accountRequest.email],
+      );
+      if (existingUser.rows[0]) {
+        const error = new Error('An active user already exists with this email address.');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      await client.query(
+        `
+          INSERT INTO users (office_id, email, password_hash, full_name, role, active)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id
+        `,
+        [
+          officeId,
+          accountRequest.email,
+          hashPassword(password),
+          accountRequest.full_name,
+          role,
+          true,
+        ],
+      );
+
+      await client.query(
+        `
+          UPDATE account_requests
+          SET status = 'approved',
+              office_id = $4,
+              reviewed_by = $2,
+              reviewed_at = now(),
+              admin_note = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id
+        `,
+        [id, user.id, adminNote, officeId],
+      );
+    });
+  } catch (error) {
+    if (error.statusCode === 409 || error.code === '23505') {
+      renderConflict(response, 'An active user already exists with this email address.', user);
+      return;
     }
-
-    if (accountRequest.status !== 'pending') {
-      const error = new Error('Only pending account requests can be approved.');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    await client.query(
-      `
-        INSERT INTO users (office_id, email, password_hash, full_name, role, active)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-      `,
-      [
-        officeId,
-        accountRequest.email,
-        hashPassword(password),
-        accountRequest.full_name,
-        role,
-        true,
-      ],
-    );
-
-    await client.query(
-      `
-        UPDATE account_requests
-        SET status = 'approved',
-            office_id = $4,
-            reviewed_by = $2,
-            reviewed_at = now(),
-            admin_note = $3,
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [id, user.id, adminNote, officeId],
-    );
-  });
+    throw error;
+  }
 
   redirect(response, '/admin/account-requests?notice=approved');
 }
@@ -1431,4 +1578,3 @@ module.exports = {
   requireServices,
   validateCsrf,
 };
-

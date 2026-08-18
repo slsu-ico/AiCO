@@ -5,6 +5,7 @@ const {
   buildFinalizePayload,
   buildRotationPayload,
   generateManagedSecret,
+  verifyHealth,
 } = require('../scripts/rotate-managed-secrets');
 
 test('generateManagedSecret creates url-safe high entropy values', () => {
@@ -29,6 +30,7 @@ test('buildRotationPayload keeps old keys active while promoting new keys', () =
       transitionMinutes: 60,
       nextMessengerVerifyToken: 'verify-new',
       nextSessionSecret: 'session-new',
+      nextRuntimeConfigVersion: 'runtime-version-2',
     },
   );
 
@@ -36,6 +38,7 @@ test('buildRotationPayload keeps old keys active while promoting new keys', () =
   assert.equal(payload.MESSENGER_VERIFY_TOKEN_PREVIOUS, 'verify-old');
   assert.equal(payload.SESSION_SECRET_CURRENT, 'session-new');
   assert.equal(payload.SESSION_SECRET_PREVIOUS, 'session-old');
+  assert.equal(payload.RUNTIME_CONFIG_VERSION, 'runtime-version-2');
   assert.equal(payload.SECRET_ROTATION_STARTED_AT, '2026-06-04T00:00:00.000Z');
   assert.equal(payload.SECRET_ROTATION_REVOKE_AFTER, '2026-06-04T01:00:00.000Z');
   assert.equal(payload.PAGE_ACCESS_TOKEN, 'page-token');
@@ -67,12 +70,44 @@ test('buildFinalizePayload revokes old keys after transition window ends', () =>
       SESSION_SECRET_PREVIOUS: 'session-old',
       SECRET_ROTATION_REVOKE_AFTER: '2026-06-04T01:00:00.000Z',
     },
-    { now: new Date('2026-06-04T01:01:00.000Z') },
+    {
+      now: new Date('2026-06-04T01:01:00.000Z'),
+      nextRuntimeConfigVersion: 'runtime-version-3',
+    },
   );
 
   assert.equal(payload.MESSENGER_VERIFY_TOKEN_CURRENT, 'verify-new');
   assert.equal(payload.MESSENGER_VERIFY_TOKEN_PREVIOUS, '');
   assert.equal(payload.SESSION_SECRET_CURRENT, 'session-new');
   assert.equal(payload.SESSION_SECRET_PREVIOUS, '');
+  assert.equal(payload.RUNTIME_CONFIG_VERSION, 'runtime-version-3');
   assert.equal(payload.SECRET_ROTATION_FINALIZED_AT, '2026-06-04T01:01:00.000Z');
+});
+
+test('verifyHealth waits for the newly deployed runtime configuration marker', async () => {
+  const versions = ['old-runtime', 'new-runtime'];
+  let calls = 0;
+
+  await verifyHealth(
+    {
+      ROTATION_HEALTH_URL: 'https://app.example.test/health',
+      RUNTIME_CONFIG_VERSION: 'new-runtime',
+    },
+    {
+      timeoutMs: 1000,
+      sleep: async () => {},
+      async fetchImpl() {
+        const runtimeConfigVersion = versions[Math.min(calls, versions.length - 1)];
+        calls += 1;
+        return {
+          ok: true,
+          async json() {
+            return { status: 'ok', runtimeConfigVersion };
+          },
+        };
+      },
+    },
+  );
+
+  assert.equal(calls, 2);
 });

@@ -10,7 +10,7 @@
     "enable-rls": "node scripts/enable-rls.js",
     "seed": "node src/db/seed.js",
     "start": "node src/server.js",
-    "ci": "corepack pnpm run lint && corepack pnpm test",
+    "ci": "corepack pnpm run format:check && corepack pnpm run lint && corepack pnpm test",
     "docker:up": "docker compose up -d postgres redis",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",

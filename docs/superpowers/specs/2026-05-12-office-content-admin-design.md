@@ -367,6 +367,9 @@ Rules:
 - Only `Published` Citizen's Charter service records are searchable by service matching.
 - Only active, published FAQ records are searchable as FAQ answers.
 - Pending Review, Needs Revision, Rejected, Draft, and Archived records are excluded.
+- Published chatbot records are cached in Redis with a 10-minute TTL.
+- Published cache writes should apply bounded TTL jitter so service and FAQ keys do not expire at exactly the same moment.
+- Concurrent cache misses for the same published-content key should use a single in-process cache fill so one PostgreSQL query warms all waiting requests.
 - If the database is unavailable, the chatbot should fail safely with a handoff message or use the last known published cache.
 
 The existing `data/services.json` can be imported into the database as initial published Citizen's Charter service records.
