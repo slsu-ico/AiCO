@@ -2,6 +2,7 @@ const { methodNotAllowed, sendHtml } = require('../../httpUtils');
 const { renderChatbotDemo, renderChatbotDemoScript } = require('../../adminViews');
 const {
   handleCacheRefresh,
+  handleChatbotPreviewMessage,
   handleDashboard,
   readForm,
   requireAdmin,
@@ -66,6 +67,33 @@ async function handleDashboardRoutes(context) {
       'cache-control': 'no-store',
     });
     response.end(renderChatbotDemoScript());
+    return true;
+  }
+
+  if (pathname === '/admin/chatbot-demo/message') {
+    if (request.method !== 'POST') {
+      methodNotAllowed(response, ['POST']);
+      return true;
+    }
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
+    if (!user) return true;
+
+    const form = await readForm(request);
+    if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) {
+      return true;
+    }
+
+    await handleChatbotPreviewMessage({
+      response,
+      form,
+      loadChatbotContent: services.loadChatbotContent,
+      logger: services.logger,
+    });
     return true;
   }
 

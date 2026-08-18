@@ -58,6 +58,8 @@ const MESSENGER_EVENT_COMPLETED_VALUE = 'completed';
  * @property {object} [notificationMailer] Optional review decision mailer.
  * @property {Array<object>} [services] Injected service records for tests or offline runs.
  * @property {Array<object>} [faqs] Injected FAQ records for tests or offline runs.
+ * @property {() => Promise<{services: Array<object>, faqs: Array<object>}>} [loadChatbotContent]
+ *   Optional shared published-content loader used by Messenger and the authenticated preview.
  * @property {number} [webhookMaxBodyBytes] Maximum accepted Messenger webhook body size.
  * @property {number} [messengerEventDedupTtlSeconds] Redis duplicate-event retention period.
  * @property {Logger} [logger] Structured logger implementation.
@@ -340,7 +342,7 @@ function createRequestHandler(options = {}) {
       logger.info({ msg: 'chatbot_analytics', ...event });
     });
 
-  async function getChatbotContent() {
+  async function defaultLoadChatbotContent() {
     if (!options.pool || !options.redis) {
       return {
         services: hasInjectedServices ? options.services : loadServices(),
@@ -357,6 +359,8 @@ function createRequestHandler(options = {}) {
 
     return { services, faqs };
   }
+
+  const loadChatbotContent = options.loadChatbotContent || defaultLoadChatbotContent;
 
   async function getBotSession(senderId) {
     if (!senderId) return null;
@@ -382,6 +386,8 @@ function createRequestHandler(options = {}) {
     secureCookies: options.secureCookies,
     csrfProtection: options.csrfProtection,
     notificationMailer: options.notificationMailer,
+    loadChatbotContent,
+    logger,
   });
 
   const sendMessage =
@@ -534,7 +540,7 @@ function createRequestHandler(options = {}) {
 
           try {
             await enqueueForSender(senderId, async () => {
-              content ||= await getChatbotContent();
+              content ||= await loadChatbotContent();
               const session = (await getBotSession(senderId)) || createInitialSession();
               const incomingText = extractIncomingText(event);
               const result = handleUserMessage(

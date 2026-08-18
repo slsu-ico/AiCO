@@ -15,7 +15,7 @@ const navByRole = {
       label: 'Overview',
       items: [
         { href: '/admin', label: 'Dashboard' },
-        { href: '/admin/chatbot-demo', label: 'Chatbot demo' },
+        { href: '/admin/chatbot-demo', label: 'Chatbot preview' },
       ],
     },
     {
@@ -32,7 +32,7 @@ const navByRole = {
       label: 'Overview',
       items: [
         { href: '/admin', label: 'Dashboard' },
-        { href: '/admin/chatbot-demo', label: 'Chatbot demo' },
+        { href: '/admin/chatbot-demo', label: 'Chatbot preview' },
       ],
     },
     {

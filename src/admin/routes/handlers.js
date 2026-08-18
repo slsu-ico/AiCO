@@ -30,6 +30,7 @@ const {
 } = require('../../adminViews');
 const { createSession, getSession, hashPassword, verifyPassword } = require('../../auth');
 const { deleteKey } = require('../../cache/redis');
+const { createInitialSession, handleUserMessage } = require('../../conversationEngine');
 const { withTransaction } = require('../../db/postgres');
 const { normalizeContentPayload } = require('../../contentPayload');
 const {
@@ -51,6 +52,15 @@ const { warmPublishedContentCache } = require('../../publishedContentRepository'
 
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_TTL_SECONDS = 15 * 60;
+const CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH = 2000;
+const CHATBOT_PREVIEW_MAX_SESSION_LENGTH = 4096;
+const CHATBOT_PREVIEW_STATES = new Set([
+  'new',
+  'selecting_service',
+  'viewing_service',
+  'viewing_faq',
+  'handoff',
+]);
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -144,9 +154,113 @@ async function readMetadata(request) {
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
+    'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
+    'x-content-type-options': 'nosniff',
   });
   response.end(JSON.stringify(payload));
+}
+
+function parseChatbotPreviewSession(value) {
+  const initial = createInitialSession();
+  if (value === undefined || value === '') return initial;
+  if (typeof value !== 'string' || value.length > CHATBOT_PREVIEW_MAX_SESSION_LENGTH) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  const state = clean(parsed.state || initial.state);
+  const audience =
+    parsed.audience === null || parsed.audience === undefined ? null : clean(parsed.audience);
+  const lastServiceId =
+    parsed.lastServiceId === null || parsed.lastServiceId === undefined
+      ? null
+      : clean(parsed.lastServiceId);
+  const locale = clean(parsed.locale || initial.locale);
+
+  if (!CHATBOT_PREVIEW_STATES.has(state)) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (audience !== null && audience !== 'internal' && audience !== 'external') {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (
+    lastServiceId !== null &&
+    (lastServiceId.length > FIELD_LIMITS.service_id ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(lastServiceId))
+  ) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (locale !== 'en' && locale !== 'fil') {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  return { state, audience, lastServiceId, locale };
+}
+
+async function handleChatbotPreviewMessage({ response, form, loadChatbotContent, logger }) {
+  if (typeof form.message !== 'string') {
+    sendJson(response, 400, { error: 'Enter a message to preview.' });
+    return;
+  }
+
+  const message = form.message.trim();
+  if (!message) {
+    sendJson(response, 400, { error: 'Enter a message to preview.' });
+    return;
+  }
+  if (message.length > CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH) {
+    sendJson(response, 400, {
+      error: `Preview messages must be ${CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH.toLocaleString('en-US')} characters or fewer.`,
+    });
+    return;
+  }
+
+  let session;
+  try {
+    session = parseChatbotPreviewSession(form.session);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (typeof loadChatbotContent !== 'function') {
+    sendJson(response, 503, { error: 'Live preview is temporarily unavailable.' });
+    return;
+  }
+
+  try {
+    const content = await loadChatbotContent();
+    const services = Array.isArray(content?.services) ? content.services : [];
+    const faqs = Array.isArray(content?.faqs) ? content.faqs : [];
+    const result = handleUserMessage(session, message, services, faqs);
+
+    sendJson(response, 200, {
+      session: result.session,
+      replies: result.replies,
+      published: {
+        services: services.length,
+        faqs: faqs.length,
+      },
+    });
+  } catch (error) {
+    logger?.error({
+      msg: 'chatbot_preview_failed',
+      requestId: response.getHeader('x-request-id'),
+      error: error.message || String(error),
+    });
+    sendJson(response, 503, { error: 'Live preview is temporarily unavailable.' });
+  }
 }
 
 async function currentSession(redis, request, sessionSecrets) {
@@ -1561,6 +1675,7 @@ module.exports = {
   handleApprove,
   handleAttachmentMetadataCreate,
   handleCacheRefresh,
+  handleChatbotPreviewMessage,
   handleContentApprove,
   handleContentHistory,
   handleContentReviewDetail,

@@ -87,6 +87,8 @@ function createAdminServer({
   csrfProtection = false,
   sessionSecret = 'test-session-secret',
   notificationMailer,
+  loadChatbotContent,
+  logger,
 }) {
   return createServer({
     pool,
@@ -96,6 +98,8 @@ function createAdminServer({
     csrfProtection,
     sessionSecret,
     notificationMailer,
+    loadChatbotContent,
+    logger,
     verifyToken: 'secret',
     sendMessage: async () => {},
   });
@@ -555,9 +559,12 @@ test('authenticated users can open the chatbot demo without a database query', a
     const html = await response.text();
 
     assert.equal(response.status, 200);
-    assert.match(html, /AiCO chatbot demo/);
+    assert.match(html, /AiCO chatbot live preview/);
+    assert.match(html, /Currently published content/);
     assert.match(html, /class="chat-demo-shell"/);
     assert.match(html, /id="chat-demo-messages"/);
+    assert.match(html, /action="\/admin\/chatbot-demo\/message"/);
+    assert.match(html, /name="_csrf"/);
     assert.match(html, /src="\/admin\/chatbot-demo\.js"/);
 
     const script = await fetch(`${baseUrl}/admin/chatbot-demo.js`, {
@@ -567,7 +574,183 @@ test('authenticated users can open the chatbot demo without a database query', a
 
     assert.equal(script.status, 200);
     assert.match(script.headers.get('content-type'), /text\/javascript/);
-    assert.match(scriptBody, /Request AVP production/);
+    assert.match(scriptBody, /fetch\(form\.action/);
+    assert.doesNotMatch(scriptBody, /Request AVP production/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('chatbot live preview uses published content with authenticated state and CSRF protection', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis);
+  let loadCount = 0;
+  let failLoad = false;
+  const logEvents = [];
+  const logger = {
+    info(event) {
+      logEvents.push(event);
+    },
+    error(event) {
+      logEvents.push(event);
+    },
+  };
+  const loadChatbotContent = async () => {
+    loadCount += 1;
+    if (failLoad) throw new Error('database password should never reach the browser');
+    return {
+      services: [
+        {
+          id: 'external-media-coverage-request',
+          audience: 'external',
+          service_name: 'Media Coverage Request',
+          description: 'Request official media coverage for an approved university activity.',
+          office_or_unit: 'Information and Communications Office',
+          classification: 'Simple',
+          who_may_avail: 'External university partners',
+          requirements: ['Approved request letter', 'Confirmed event details'],
+          submission_timeline: ['Submit the request', 'Wait for schedule confirmation'],
+          official_link: 'https://www.slsu.edu.ph/media-coverage',
+          fees: 'None',
+          processing_time: 'Three working days',
+          css_reminder: 'Complete the Client Satisfaction Survey.',
+        },
+      ],
+      faqs: [
+        {
+          question: 'Where can I find media templates?',
+          answer: 'Use the official SLSU media resources page.',
+          keywords: ['media templates'],
+        },
+      ],
+    };
+  };
+  const pool = createFakePool(() => {
+    throw new Error('the injected production content loader should be used');
+  });
+  const server = createHardenedAdminServer({ pool, redis, loadChatbotContent, logger });
+  const baseUrl = await listen(server);
+
+  try {
+    const unauthenticated = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form({ message: 'hello' }),
+      redirect: 'manual',
+    });
+    assert.equal(unauthenticated.status, 303);
+    assert.equal(unauthenticated.headers.get('location'), '/login');
+    assert.equal(loadCount, 0);
+
+    const page = await fetch(`${baseUrl}/admin/chatbot-demo`, { headers: { cookie } });
+    const csrfToken = extractCsrfToken(await page.text());
+    assert.equal(page.status, 200);
+    assert.ok(csrfToken);
+
+    const forged = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: 'forged', message: 'hello' }),
+    });
+    assert.equal(forged.status, 403);
+    assert.equal(loadCount, 0);
+
+    const invalidSession = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: csrfToken, message: 'hello', session: '{not-json' }),
+    });
+    assert.equal(invalidSession.status, 400);
+    assert.match((await invalidSession.json()).error, /Preview session is invalid/);
+    assert.equal(loadCount, 0);
+
+    const oversizedMessage = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: csrfToken, message: 'x'.repeat(2001), session: '{}' }),
+    });
+    assert.equal(oversizedMessage.status, 400);
+    assert.match((await oversizedMessage.json()).error, /2,000 characters or fewer/);
+    assert.equal(loadCount, 0);
+
+    const hello = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: csrfToken, message: 'hello', session: '{}' }),
+    });
+    const helloPayload = await hello.json();
+    assert.equal(hello.status, 200);
+    assert.equal(hello.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(helloPayload.published, { services: 1, faqs: 1 });
+    assert.match(helloPayload.replies[0].text, /Media Coverage Request/);
+    assert.equal(
+      helloPayload.replies[0].quickReplies[0].payload,
+      'SERVICE_external-media-coverage-request',
+    );
+    assert.equal(Object.hasOwn(helloPayload, 'analytics'), false);
+
+    const selected = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        _csrf: csrfToken,
+        message: 'SERVICE_external-media-coverage-request',
+        session: JSON.stringify(helloPayload.session),
+      }),
+    });
+    const selectedPayload = await selected.json();
+    assert.equal(selected.status, 200);
+    assert.match(selectedPayload.replies[0].text, /Approved request letter/);
+    assert.match(selectedPayload.replies[0].text, /Three working days/);
+
+    const faq = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        _csrf: csrfToken,
+        message: 'media templates',
+        session: JSON.stringify(selectedPayload.session),
+      }),
+    });
+    const faqPayload = await faq.json();
+    assert.equal(faq.status, 200);
+    assert.match(faqPayload.replies[0].text, /official SLSU media resources page/);
+
+    failLoad = true;
+    const unavailable = await fetch(`${baseUrl}/admin/chatbot-demo/message`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: csrfToken, message: 'hello', session: '{}' }),
+    });
+    const unavailableBody = await unavailable.text();
+    assert.equal(unavailable.status, 503);
+    assert.match(unavailableBody, /Live preview is temporarily unavailable/);
+    assert.doesNotMatch(unavailableBody, /database password/);
+    assert.equal(loadCount, 4);
+    const previewFailure = logEvents.find((event) => event.msg === 'chatbot_preview_failed');
+    assert.ok(previewFailure?.requestId);
+    assert.match(previewFailure.error, /database password/);
   } finally {
     await close(server);
   }

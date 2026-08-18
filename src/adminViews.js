@@ -756,25 +756,30 @@ function renderUserManagement(users, offices, user, options = {}) {
 
 function renderChatbotDemo(user) {
   return pageLayout({
-    title: 'AiCO chatbot demo',
+    title: 'AiCO chatbot live preview',
     activePath: '/admin/chatbot-demo',
     user,
-    subtitle: 'Local simulator for common ICO service questions',
+    subtitle: 'Preview the same published content and conversation engine used by Messenger',
     body: `
-      <section class="chat-demo-shell" aria-label="AiCO chatbot demo">
+      <section class="panel-section" aria-labelledby="chat-preview-note">
+        <h2 id="chat-preview-note">Currently published content</h2>
+        <p>This preview reads the live chatbot service and FAQ cache. Pending submissions appear here only after an administrator approves and publishes them.</p>
+      </section>
+      <section class="chat-demo-shell" aria-label="AiCO chatbot live preview">
         <div class="chat-demo-header">
           <div class="chat-demo-avatar">ICO</div>
           <div>
             <strong>ICO Services Assistant</strong>
-            <span>Southern Luzon State University</span>
+            <span id="chat-demo-status" aria-live="polite">Loading published content…</span>
           </div>
           <button class="chat-demo-reset" id="chat-demo-reset" type="button">Reset</button>
         </div>
         <div class="chat-demo-messages" id="chat-demo-messages" aria-live="polite"></div>
         <div class="quick-replies" id="chat-demo-quick-replies" aria-label="Suggested questions"></div>
-        <form class="chat-demo-input" id="chat-demo-form">
+        <form class="chat-demo-input" id="chat-demo-form" method="post" action="/admin/chatbot-demo/message">
+          ${csrfInput(user)}
           <label class="sr-only" for="chat-demo-input">Message</label>
-          <input id="chat-demo-input" name="message" autocomplete="off" placeholder='Try "I need an AVP" or "request layout design"'>
+          <input id="chat-demo-input" name="message" autocomplete="off" maxlength="2000" placeholder="Type a published service name or question">
           <button type="submit">Send</button>
         </form>
       </section>
@@ -791,31 +796,16 @@ function renderChatbotDemoScript() {
   const form = document.getElementById('chat-demo-form');
   const input = document.getElementById('chat-demo-input');
   const reset = document.getElementById('chat-demo-reset');
-  const quickReplies = [
-    'Request AVP production',
-    'Request layout design',
-    'Social media guidelines',
-    'Processing time',
-  ];
+  const submit = form?.querySelector('button[type="submit"]');
+  const csrf = form?.querySelector('input[name="_csrf"]');
+  const status = document.getElementById('chat-demo-status');
 
-  if (!messages || !replies || !form || !input || !reset) return;
+  if (!messages || !replies || !form || !input || !reset || !submit || !csrf || !status) return;
 
-  const responseFor = (text) => {
-    const value = text.toLowerCase();
-    if (value.includes('avp') || value.includes('video')) {
-      return 'For AVP production, prepare the approved request letter, event details, target date, and available reference materials. Processing may take up to 17 working days depending on scope.';
-    }
-    if (value.includes('layout') || value.includes('template') || value.includes('design')) {
-      return 'For layout design requests, submit your content draft, required size, deadline, and office contact person. AiCO can guide you to the ICO templates and requirements.';
-    }
-    if (value.includes('social') || value.includes('posting') || value.includes('guideline')) {
-      return 'For social media posting, use official SLSU templates and prepare caption copy, publication date, and any approved photos or attachments.';
-    }
-    if (value.includes('time') || value.includes('deadline') || value.includes('processing')) {
-      return 'Processing time depends on the service type. AiCO can show the published Citizen Charter record once the service request is selected.';
-    }
-    return 'I can help with ICO service requests, published requirements, processing time, and where to submit supporting details. Try one of the quick replies below.';
-  };
+  let previewSession = null;
+  let activeController = null;
+  let generation = 0;
+  let busy = false;
 
   const appendMessage = (text, sender) => {
     const row = document.createElement('div');
@@ -834,37 +824,121 @@ function renderChatbotDemoScript() {
     messages.scrollTop = messages.scrollHeight;
   };
 
-  const send = (text) => {
-    const clean = String(text || '').trim();
-    if (!clean) return;
-    appendMessage(clean, 'user');
-    window.setTimeout(() => appendMessage(responseFor(clean), 'bot'), 140);
-    input.value = '';
+  const setBusy = (value) => {
+    busy = value;
+    input.disabled = value;
+    submit.disabled = value;
+    replies.querySelectorAll('button').forEach((button) => {
+      button.disabled = value;
+    });
   };
 
-  const renderReplies = () => {
+  const renderReplies = (botReplies) => {
     replies.textContent = '';
+    const quickReplies = [];
+    (Array.isArray(botReplies) ? botReplies : []).forEach((reply) => {
+      if (Array.isArray(reply.quickReplies)) quickReplies.push(...reply.quickReplies);
+    });
+
     quickReplies.forEach((reply) => {
+      if (!reply || typeof reply.title !== 'string' || typeof reply.payload !== 'string') return;
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = reply;
-      button.addEventListener('click', () => send(reply));
+      button.textContent = reply.title;
+      button.addEventListener('click', () => requestTurn(reply.payload, { label: reply.title }));
       replies.appendChild(button);
     });
   };
 
-  const seed = () => {
-    messages.textContent = '';
-    appendMessage('Hello. I am AiCO, the ICO Services Assistant for Southern Luzon State University. What service do you need help with today?', 'bot');
-    renderReplies();
+  const updatePublishedStatus = (published) => {
+    const serviceCount = Number(published?.services || 0);
+    const faqCount = Number(published?.faqs || 0);
+    status.textContent =
+      serviceCount +
+      ' published ' +
+      (serviceCount === 1 ? 'service' : 'services') +
+      ' · ' +
+      faqCount +
+      ' ' +
+      (faqCount === 1 ? 'FAQ' : 'FAQs');
+  };
+
+  const requestTurn = async (message, options = {}) => {
+    const clean = String(message || '').trim();
+    if (!clean || (busy && !options.force)) return;
+
+    if (options.reset) {
+      generation += 1;
+      activeController?.abort();
+      previewSession = null;
+      messages.textContent = '';
+      replies.textContent = '';
+      status.textContent = 'Loading published content…';
+    }
+
+    const turn = ++generation;
+    const controller = new AbortController();
+    activeController = controller;
+    setBusy(true);
+
+    if (options.showUser !== false) appendMessage(options.label || clean, 'user');
+    input.value = '';
+
+    try {
+      const body = new URLSearchParams({
+        _csrf: csrf.value,
+        message: clean,
+        session: JSON.stringify(previewSession || {}),
+      });
+      const response = await fetch(form.action, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: controller.signal,
+      });
+
+      if (response.redirected) {
+        throw new Error('Your admin session expired. Refresh this page and sign in again.');
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const payload = contentType.includes('application/json') ? await response.json() : {};
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Your admin session expired. Refresh this page and sign in again.');
+        }
+        throw new Error(payload.error || 'Live preview is temporarily unavailable. Please retry.');
+      }
+      if (turn !== generation) return;
+
+      previewSession = payload.session || null;
+      const botReplies = Array.isArray(payload.replies) ? payload.replies : [];
+      botReplies.forEach((reply) => {
+        if (reply && typeof reply.text === 'string') appendMessage(reply.text, 'bot');
+      });
+      renderReplies(botReplies);
+      updatePublishedStatus(payload.published);
+    } catch (error) {
+      if (error.name === 'AbortError' || turn !== generation) return;
+      appendMessage(error.message || 'Live preview is temporarily unavailable. Please retry.', 'bot');
+      status.textContent = 'Preview unavailable';
+    } finally {
+      if (turn === generation) {
+        activeController = null;
+        setBusy(false);
+        input.focus();
+      }
+    }
   };
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    send(input.value);
+    requestTurn(input.value);
   });
-  reset.addEventListener('click', seed);
-  seed();
+  reset.addEventListener('click', () =>
+    requestTurn('BACK_TO_START', { force: true, reset: true, showUser: false }),
+  );
+  requestTurn('BACK_TO_START', { force: true, reset: true, showUser: false });
 })();
 `;
 }
