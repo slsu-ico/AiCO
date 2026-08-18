@@ -56,10 +56,43 @@ function parseCookies(cookieHeader) {
   }, {});
 }
 
-function getSessionId(cookieHeader) {
-  const sessionId = parseCookies(cookieHeader)[AICO_SESSION_COOKIE];
+function configuredSessionSecrets(options = {}) {
+  const values = options.sessionSecrets || [options.sessionSecret];
+  return values.filter((value) => typeof value === 'string' && value.length > 0);
+}
+
+function signSessionId(sessionId, secret) {
+  return crypto.createHmac('sha256', secret).update(sessionId).digest('base64url');
+}
+
+function signaturesMatch(actual, expected) {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
+function signedSessionValue(sessionId, secret) {
+  return secret ? `${sessionId}.${signSessionId(sessionId, secret)}` : sessionId;
+}
+
+function getSessionId(cookieHeader, options = {}) {
+  const cookieValue = parseCookies(cookieHeader)[AICO_SESSION_COOKIE];
+  if (!cookieValue) return null;
+
+  const secrets = configuredSessionSecrets(options);
+  if (secrets.length === 0) return SESSION_ID_PATTERN.test(cookieValue) ? cookieValue : null;
+
+  const separatorIndex = cookieValue.indexOf('.');
+  if (separatorIndex === -1) return null;
+  const sessionId = cookieValue.slice(0, separatorIndex);
+  const signature = cookieValue.slice(separatorIndex + 1);
   if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return null;
-  return sessionId;
+  return secrets.some((secret) => signaturesMatch(signature, signSessionId(sessionId, secret)))
+    ? sessionId
+    : null;
 }
 
 function sanitizeUser(user) {
@@ -85,17 +118,20 @@ async function createSession(redis, user, options = {}) {
 
   await setJson(redis, key, session, { ttlSeconds });
 
+  const [currentSecret] = configuredSessionSecrets(options);
+  const cookieValue = signedSessionValue(sessionId, currentSecret);
+
   return {
     sessionId,
     key,
     session,
-    cookieValue: sessionId,
-    cookieHeader: sessionCookie(sessionId, ttlSeconds, options),
+    cookieValue,
+    cookieHeader: sessionCookie(cookieValue, ttlSeconds, options),
   };
 }
 
-async function getSession(redis, cookieHeader) {
-  const sessionId = getSessionId(cookieHeader);
+async function getSession(redis, cookieHeader, options = {}) {
+  const sessionId = getSessionId(cookieHeader, options);
   if (!sessionId) return null;
 
   const session = await getJson(redis, sessionKey(sessionId));
@@ -107,8 +143,8 @@ async function getSession(redis, cookieHeader) {
   };
 }
 
-async function destroySession(redis, cookieHeader) {
-  const sessionId = getSessionId(cookieHeader);
+async function destroySession(redis, cookieHeader, options = {}) {
+  const sessionId = getSessionId(cookieHeader, options);
   if (!sessionId) return false;
 
   return deleteKey(redis, sessionKey(sessionId));
@@ -123,5 +159,6 @@ module.exports = {
   getSession,
   hashPassword,
   sessionCookie,
+  signedSessionValue,
   verifyPassword,
 };

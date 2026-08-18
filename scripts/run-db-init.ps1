@@ -12,7 +12,7 @@ if (-not $env:BOOTSTRAP_ADMIN_PASSWORD) {
   exit 1
 }
 
-Write-Host "Using DATABASE_URL=$($env:DATABASE_URL)"
+Write-Host 'Using DATABASE_URL from the current environment (value hidden).'
 Write-Host 'Running database migrations...'
 corepack pnpm run migrate
 

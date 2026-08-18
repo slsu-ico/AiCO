@@ -7,6 +7,7 @@ const CONTENT_SECURITY_POLICY = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
 ].join('; ');
+const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -32,13 +33,10 @@ function parseUrlEncoded(body) {
   return data;
 }
 
-function readBody(request) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    request.on('data', (chunk) => chunks.push(chunk));
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    request.on('error', reject);
-  });
+async function readBody(request, options = {}) {
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const body = await readBodyBuffer(request, { maxBytes });
+  return body.toString('utf8');
 }
 
 function bodyTooLargeError(maxBytes) {
@@ -58,6 +56,7 @@ function readBodyBuffer(request, options = {}) {
 
     const contentLength = Number(request.headers?.['content-length']);
     if (maxBytes && Number.isFinite(contentLength) && contentLength > maxBytes) {
+      if (typeof request.resume === 'function') request.resume();
       reject(bodyTooLargeError(maxBytes));
       return;
     }
@@ -67,8 +66,8 @@ function readBodyBuffer(request, options = {}) {
       totalBytes += chunk.length;
       if (maxBytes && totalBytes > maxBytes) {
         rejected = true;
+        chunks.length = 0;
         reject(bodyTooLargeError(maxBytes));
-        if (typeof request.destroy === 'function') request.destroy();
         return;
       }
       chunks.push(chunk);
@@ -82,8 +81,12 @@ function readBodyBuffer(request, options = {}) {
 
 function sendHtml(response, statusCode, html) {
   response.writeHead(statusCode, {
+    'cache-control': 'no-store',
     'content-security-policy': CONTENT_SECURITY_POLICY,
     'content-type': 'text/html; charset=utf-8',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
   });
   response.end(html);
 }
@@ -109,6 +112,7 @@ function methodNotAllowed(response, allowedMethods) {
 
 module.exports = {
   CONTENT_SECURITY_POLICY,
+  DEFAULT_MAX_BODY_BYTES,
   escapeHtml,
   parseUrlEncoded,
   readBody,

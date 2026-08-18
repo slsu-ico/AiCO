@@ -91,6 +91,27 @@ test('answers published FAQs before handing off', () => {
   assert.match(result.replies[0].text, /reports@slsu\.edu\.ph/);
 });
 
+test('ignores malformed published records while answering from valid content', () => {
+  const session = createInitialSession();
+  const services = [
+    { id: 'malformed-service', service_name: null },
+    ...require('../data/services.json'),
+  ];
+  const faqs = [
+    { title: 'Malformed FAQ without an answer' },
+    {
+      question: 'Where can I find the official template library?',
+      answer: 'Open the official ICO template library.',
+    },
+  ];
+
+  assert.doesNotThrow(() => handleUserMessage(session, 'hello', services, faqs));
+  const result = handleUserMessage(session, 'Where is the template library?', services, faqs);
+
+  assert.equal(result.session.state, 'viewing_faq');
+  assert.match(result.replies[0].text, /official ICO template library/);
+});
+
 test('hands off when free text is outside the charter', () => {
   const session = createInitialSession();
   const result = handleUserMessage(session, 'How do I enroll as a first year student?');

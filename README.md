@@ -7,6 +7,8 @@ Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State Univer
 - Answers Messenger questions from approved ICO service records.
 - Guides internal offices and external partners to the right Citizen's Charter service.
 - Provides an admin portal for account requests, office content submissions, admin review, and publication.
+- Gives office users a dedicated `/admin/processes/new` form for enrolling Citizen's Charter processes.
+- Includes an authenticated live chatbot preview backed by the same published content loader and conversation engine as Messenger.
 - Keeps pending edits out of live chatbot answers until an administrator publishes them.
 
 ## Requirements
@@ -74,11 +76,14 @@ Set these values in your shell, process manager, or deployment environment befor
 
 - `PORT`: HTTP port, default `3000`.
 - `MESSENGER_VERIFY_TOKEN`: webhook verify token configured in Meta.
+- `MESSENGER_APP_SECRET`: Meta app secret used to verify `X-Hub-Signature-256`; required in production.
 - `PAGE_ACCESS_TOKEN`: Facebook Page access token for replies.
 - `DATABASE_URL`: PostgreSQL connection string. In production, this must point to a cloud database such as Supabase, Neon, RDS, or another hosted Postgres instance.
 - `REDIS_URL`: Redis connection string. In production, use a managed Redis provider such as Upstash, Redis Enterprise, Amazon MemoryDB, or another external Redis service.
 - `UPLOAD_DIR`: local upload storage path, default `uploads`.
 - `SESSION_SECRET`: long random secret for admin sessions.
+- `WEBHOOK_MAX_BODY_BYTES`: maximum Messenger webhook body size, default `1048576` (1 MiB).
+- `MESSENGER_EVENT_DEDUP_TTL_SECONDS`: Redis duplicate-event retention, default `86400` (24 hours).
 - `BOOTSTRAP_ADMIN_EMAIL`: email for the initial admin user.
 - `BOOTSTRAP_ADMIN_PASSWORD`: temporary initial admin password used only by the seed command.
 - `AI_FALLBACK_ENABLED`: reserved flag in `.env.example`; the current chatbot path is published-content first.
@@ -90,9 +95,10 @@ Production secrets must be stored in HashiCorp Vault, not `.env` files and not V
 - `VAULT_SECRET_PATH`
 - `VAULT_JWT_AUTH_PATH`
 - `VAULT_JWT_ROLE`
-- `VAULT_JWT_FILE` or `VERCEL_OIDC_TOKEN_FILE`
+- `VAULT_JWT_FILE` for local or CI file-based workload identity. On Vercel, the API entrypoint forwards the platform-provided `x-vercel-oidc-token` request header directly to Vault authentication.
 
 The app fetches Vault values at startup. During rotation it accepts both `MESSENGER_VERIFY_TOKEN_CURRENT` and `MESSENGER_VERIFY_TOKEN_PREVIOUS`.
+Store `MESSENGER_APP_SECRET` in the same Vault record. Production startup fails if it is absent.
 
 ## Setup
 
@@ -184,8 +190,11 @@ To update live chatbot content in the cloud, publish content through the admin p
 4. Deploy this app to a public HTTPS host.
 5. Set the webhook callback URL to `https://your-domain.example/webhook`.
 6. Use the same verify token as `MESSENGER_VERIFY_TOKEN`.
-7. Subscribe the Page to message events.
-8. Send a test message to the Page.
+7. Store the app's Meta App Secret as `MESSENGER_APP_SECRET` so webhook signatures are authenticated.
+8. Subscribe the Page to message events.
+9. Send a test message to the Page.
+
+The webhook validates signatures against the exact request bytes, limits body size, and uses Messenger message/postback IDs in Redis to suppress retried events. Responses are acknowledged only after event processing completes.
 
 ## Development
 

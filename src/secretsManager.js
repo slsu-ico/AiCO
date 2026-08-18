@@ -27,12 +27,18 @@ async function fetchVaultJson(url, options, fetchImpl) {
   return response.json();
 }
 
-async function getVaultToken({ env = process.env, fetchImpl = fetch }) {
+async function getVaultToken({ env = process.env, fetchImpl = fetch, oidcToken = '' }) {
   if (env.VAULT_JWT_AUTH_PATH && env.VAULT_JWT_ROLE) {
     const jwt =
       env.VAULT_JWT ||
+      oidcToken ||
+      env.VERCEL_OIDC_TOKEN ||
       (await readRequiredFile(env.VAULT_JWT_FILE || env.VERCEL_OIDC_TOKEN_FILE, 'Vault JWT'));
-    if (!jwt) throw new Error('VAULT_JWT_FILE or VERCEL_OIDC_TOKEN_FILE is required for Vault JWT auth.');
+    if (!jwt) {
+      throw new Error(
+        'VAULT_JWT, VERCEL_OIDC_TOKEN, VAULT_JWT_FILE, or VERCEL_OIDC_TOKEN_FILE is required for Vault JWT auth.',
+      );
+    }
 
     const address = normalizeVaultAddress(env.VAULT_ADDR);
     const authPath = env.VAULT_JWT_AUTH_PATH.replace(/^\/+|\/+$/g, '');
@@ -46,21 +52,25 @@ async function getVaultToken({ env = process.env, fetchImpl = fetch }) {
       fetchImpl,
     );
 
-    if (!result.auth?.client_token) throw new Error('Vault JWT auth response did not include a client token.');
+    if (!result.auth?.client_token) {
+      throw new Error('Vault JWT auth response did not include a client token.');
+    }
     return result.auth.client_token;
   }
 
   const token = env.VAULT_TOKEN || (await readRequiredFile(env.VAULT_TOKEN_FILE, 'Vault token'));
-  if (!token) throw new Error('VAULT_TOKEN_FILE is required when Vault JWT auth is not configured.');
+  if (!token) {
+    throw new Error('VAULT_TOKEN_FILE is required when Vault JWT auth is not configured.');
+  }
   return token;
 }
 
-async function loadManagedSecrets({ env = process.env, fetchImpl = fetch } = {}) {
+async function loadManagedSecrets({ env = process.env, fetchImpl = fetch, oidcToken = '' } = {}) {
   if (!shouldUseManagedSecrets(env)) return {};
 
   const address = normalizeVaultAddress(env.VAULT_ADDR);
   const path = (env.VAULT_SECRET_PATH || DEFAULT_VAULT_SECRET_PATH).replace(/^\/+/, '');
-  const token = await getVaultToken({ env, fetchImpl });
+  const token = await getVaultToken({ env, fetchImpl, oidcToken });
   const headers = { 'x-vault-token': token };
   if (env.VAULT_NAMESPACE) headers['x-vault-namespace'] = env.VAULT_NAMESPACE;
 

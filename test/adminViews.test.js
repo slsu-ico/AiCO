@@ -7,6 +7,7 @@ const {
   renderChatbotDemoScript,
   renderLogin,
   renderNewContentForm,
+  renderNewProcessForm,
 } = require('../src/adminViews');
 
 test('admin view module escapes notice text rendered by public forms', () => {
@@ -26,6 +27,28 @@ test('admin view module renders office content form with escaped user metadata',
 
   assert.match(html, /value="7&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;"/);
   assert.match(html, /value="token&quot;&gt;&lt;script&gt;alert\(2\)&lt;\/script&gt;"/);
+  assert.doesNotMatch(html, /<script>alert/);
+});
+
+test('process enrollment view is a dedicated service-only form', () => {
+  const html = renderNewProcessForm({
+    user: {
+      office_id: '7"><script>alert(1)</script>',
+      csrfToken: 'token"><script>alert(2)</script>',
+    },
+  });
+
+  assert.match(html, /Enroll a new process/);
+  assert.match(html, /action="\/admin\/processes"/);
+  assert.match(html, /name="service_id"/);
+  assert.match(html, /name="audience"/);
+  assert.match(html, /name="service_name"/);
+  assert.match(html, /name="official_link"/);
+  assert.match(html, /name="_csrf"/);
+  assert.doesNotMatch(html, /name="office_id"/);
+  assert.doesNotMatch(html, /name="content_type"/);
+  assert.doesNotMatch(html, /name="question"/);
+  assert.doesNotMatch(html, /name="attachment"/);
   assert.doesNotMatch(html, /<script>alert/);
 });
 
@@ -49,26 +72,38 @@ test('admin dashboard renders compact metric tiles with existing actions', () =>
   assert.match(html, /value="csrf-token"/);
 });
 
-test('chatbot demo renders static simulator shell safely', () => {
+test('chatbot preview renders a live published-content shell safely', () => {
   const html = renderChatbotDemo({
     role: 'admin',
     name: '<script>alert(1)</script>',
+    csrfToken: 'preview-csrf-token',
   });
 
-  assert.match(html, /AiCO chatbot demo/);
+  assert.match(html, /AiCO chatbot live preview/);
+  assert.match(html, /same published content and conversation engine used by Messenger/i);
+  assert.match(html, /Pending submissions appear here only after/i);
   assert.match(html, /class="chat-demo-shell"/);
   assert.match(html, /id="chat-demo-messages"/);
   assert.match(html, /id="chat-demo-form"/);
+  assert.match(html, /action="\/admin\/chatbot-demo\/message"/);
+  assert.match(html, /name="_csrf" type="hidden" value="preview-csrf-token"/);
+  assert.match(html, /id="chat-demo-status"/);
   assert.match(html, /src="\/admin\/chatbot-demo\.js"/);
-  assert.match(html, /Southern Luzon State University/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>alert/);
 });
 
-test('chatbot demo script seeds local quick replies', () => {
+test('chatbot preview script renders replies from the authenticated live endpoint', () => {
   const script = renderChatbotDemoScript();
 
-  assert.match(script, /Request AVP production/);
+  assert.match(script, /fetch\(form\.action/);
+  assert.match(script, /new URLSearchParams/);
+  assert.match(script, /payload\.replies/);
+  assert.match(script, /reply\.payload/);
+  assert.match(script, /BACK_TO_START/);
+  assert.match(script, /AbortController/);
   assert.match(script, /chat-demo-messages/);
   assert.match(script, /addEventListener\('submit'/);
+  assert.doesNotMatch(script, /responseFor/);
+  assert.doesNotMatch(script, /Request AVP production/);
 });

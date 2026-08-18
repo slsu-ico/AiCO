@@ -45,14 +45,49 @@ function createRedisClient(config = {}) {
     return {
       async connect() {},
       async disconnect() {},
-      async set(key, value) {
-        store.set(key, value);
+      async set(key, value, options = {}) {
+        const existing = store.get(key);
+        if (existing?.expiresAt !== null && existing?.expiresAt <= Date.now()) {
+          store.delete(key);
+        }
+
+        const condition = options.condition ?? (options.NX ? 'NX' : options.XX ? 'XX' : null);
+        if (condition === 'NX' && store.has(key)) return null;
+        if (condition === 'XX' && !store.has(key)) return null;
+
+        const expiration =
+          options.expiration ??
+          (options.EX !== undefined
+            ? { type: 'EX', value: options.EX }
+            : options.PX !== undefined
+              ? { type: 'PX', value: options.PX }
+              : null);
+        let expiresAt = null;
+        if (expiration?.type === 'EX') {
+          expiresAt = Date.now() + Number(expiration.value) * 1000;
+        } else if (expiration?.type === 'PX') {
+          expiresAt = Date.now() + Number(expiration.value);
+        }
+
+        store.set(key, { value, expiresAt });
         return 'OK';
       },
       async get(key) {
-        return store.get(key) ?? null;
+        const entry = store.get(key);
+        if (!entry) return null;
+        if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+          store.delete(key);
+          return null;
+        }
+        return entry.value;
       },
       async del(key) {
+        const entry = store.get(key);
+        if (entry?.expiresAt !== null && entry?.expiresAt <= Date.now()) {
+          store.delete(key);
+          return 0;
+        }
+
         const existed = store.delete(key);
         return existed ? 1 : 0;
       },
@@ -79,17 +114,19 @@ async function setJson(redis, key, value, options = {}) {
     setFallback(redis, key, payload, ttlSeconds);
     try {
       await redis.set(key, payload, { expiration: { type: 'EX', value: ttlSeconds } });
+      return true;
     } catch {
-      return;
+      return false;
     }
-    return;
   }
 
   setFallback(redis, key, payload, ttlSeconds);
   try {
     await redis.set(key, payload);
+    return true;
   } catch {
     // The process-local fallback keeps admin sessions usable during short Redis outages.
+    return false;
   }
 }
 

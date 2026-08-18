@@ -12,10 +12,12 @@ function createAdminRouteHandler(options = {}) {
     redis: options.redis,
     uploadDir: options.uploadDir || 'uploads',
     notificationMailer: options.notificationMailer,
+    loadChatbotContent: options.loadChatbotContent,
+    logger: options.logger,
+    sessionSecrets: options.sessionSecrets || [options.sessionSecret].filter(Boolean),
   };
   const secureCookies = options.secureCookies;
   const csrfProtection = options.csrfProtection !== false;
-  void options.sessionSecret;
 
   const routeFamilies = [
     handleSessionRoutes,

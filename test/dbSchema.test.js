@@ -99,6 +99,7 @@ test('schema defines content item and version columns for review workflow', () =
     'bigint\\s+NOT NULL\\s+REFERENCES offices\\(id\\) ON DELETE CASCADE',
   );
   assertColumn(contentItems, 'current_published_version_id', 'bigint');
+  assertColumn(contentItems, 'published_service_id', 'text');
   assertColumn(contentItems, 'active', 'boolean\\s+NOT NULL\\s+DEFAULT true');
   assertColumn(contentItems, 'created_by', 'bigint\\s+REFERENCES users\\(id\\) ON DELETE SET NULL');
 
@@ -191,7 +192,15 @@ test('schema defines required lookup indexes', () => {
   );
   assert.match(
     schema,
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_active_unique\s+ON users\(lower\(email\)\)\s+WHERE active = true/i,
+  );
+  assert.match(
+    schema,
     /CREATE INDEX IF NOT EXISTS idx_content_items_office_type\s+ON content_items\(office_id,\s*content_type\)/i,
+  );
+  assert.match(
+    schema,
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_content_items_published_service_id_unique\s+ON content_items\(published_service_id\)\s+WHERE active = true AND published_service_id IS NOT NULL/i,
   );
   assert.match(
     schema,
@@ -233,6 +242,7 @@ test('withTransaction commits successful callbacks and releases the client', asy
   const client = {
     async query(text) {
       calls.push(text);
+      return { rows: [] };
     },
     release() {
       calls.push('release');
@@ -365,6 +375,7 @@ test('migrate executes schema.sql inside a transaction', async () => {
   const client = {
     async query(text) {
       calls.push(text);
+      return { rows: [] };
     },
     release() {
       calls.push('release');
@@ -379,7 +390,11 @@ test('migrate executes schema.sql inside a transaction', async () => {
 
   await migrate(pool);
 
-  assert.deepEqual(calls, ['connect', 'BEGIN', schema, 'COMMIT', 'release']);
+  assert.equal(calls[0], 'connect');
+  assert.equal(calls[1], 'BEGIN');
+  assert.equal(calls[2], schema);
+  assert.match(calls[3], /FROM content_items ci/);
+  assert.deepEqual(calls.slice(4), ['COMMIT', 'release']);
 });
 
 test('migrate rolls back when schema execution fails', async () => {
@@ -408,4 +423,39 @@ test('migrate rolls back when schema execution fails', async () => {
   await assert.rejects(migrate(pool), expectedError);
 
   assert.deepEqual(calls, ['connect', 'BEGIN', schema, 'ROLLBACK', 'release']);
+});
+
+test('migrate rolls back when legacy published chatbot content is invalid', async () => {
+  const { migrate } = require('../src/db/migrate');
+  const schema = readSchema();
+  const calls = [];
+  const client = {
+    async query(text) {
+      calls.push(text);
+      if (text === schema) return { rows: [] };
+      return {
+        rows: [
+          {
+            content_item_id: 90,
+            content_version_id: 55,
+            content_type: 'citizens_charter_service',
+            structured_payload: { id: 'legacy-service', service_name: 'Legacy service' },
+          },
+        ],
+      };
+    },
+    release() {
+      calls.push('release');
+    },
+  };
+  const pool = {
+    async connect() {
+      calls.push('connect');
+      return client;
+    },
+  };
+
+  await assert.rejects(migrate(pool), /content item 90.*version 55.*Audience is required/i);
+  assert.equal(calls.at(-2), 'ROLLBACK');
+  assert.equal(calls.at(-1), 'release');
 });

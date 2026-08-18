@@ -2,6 +2,7 @@ const { methodNotAllowed, sendHtml } = require('../../httpUtils');
 const { renderChatbotDemo, renderChatbotDemoScript } = require('../../adminViews');
 const {
   handleCacheRefresh,
+  handleChatbotPreviewMessage,
   handleDashboard,
   readForm,
   requireAdmin,
@@ -17,7 +18,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     const notice =
@@ -31,7 +37,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     sendHtml(response, 200, renderChatbotDemo(user));
@@ -43,7 +54,12 @@ async function handleDashboardRoutes(context) {
       methodNotAllowed(response, ['GET']);
       return true;
     }
-    const user = await requireAdmin({ request, response, redis: services.redis });
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     response.writeHead(200, {
@@ -54,8 +70,40 @@ async function handleDashboardRoutes(context) {
     return true;
   }
 
+  if (pathname === '/admin/chatbot-demo/message') {
+    if (request.method !== 'POST') {
+      methodNotAllowed(response, ['POST']);
+      return true;
+    }
+    const user = await requireAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
+    if (!user) return true;
+
+    const form = await readForm(request);
+    if (!(await validateCsrf({ request, response, user, form, csrfProtection }))) {
+      return true;
+    }
+
+    await handleChatbotPreviewMessage({
+      response,
+      form,
+      loadChatbotContent: services.loadChatbotContent,
+      logger: services.logger,
+    });
+    return true;
+  }
+
   if (pathname === '/admin/cache/refresh') {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {

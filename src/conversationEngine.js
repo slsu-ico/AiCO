@@ -5,6 +5,7 @@ const {
   searchServices,
   tokenize,
 } = require('./serviceRepository');
+const { normalizePublishedRecords } = require('./contentPayload');
 
 /**
  * @typedef {object} BotSession
@@ -183,9 +184,7 @@ function serviceListAllReply(services = loadServices(), locale = 'en') {
   return {
     text:
       locale === 'fil'
-        ? ['Narito ang mga serbisyo ng ICO:', '', ...lines, '', 'Pumili po ng serbisyo.'].join(
-            '\n',
-          )
+        ? ['Narito ang mga serbisyo ng ICO:', '', ...lines, '', 'Pumili po ng serbisyo.'].join('\n')
         : ['Here are the ICO services:', '', ...lines, '', 'Please choose a service.'].join('\n'),
     quickReplies: services.map((service) =>
       quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
@@ -350,15 +349,17 @@ function withAnalytics(result, analytics = []) {
  * @param {FaqRecord[]} [faqs] Published FAQ records available to the chatbot.
  * @returns {ChatbotResult}
  */
-function handleUserMessage(session, message, services = loadServices(), faqs = []) {
+function handleUserMessage(session, message, services = loadServices(), faqs = [], options = {}) {
   const current = cloneSession(session);
   const input = normalizeMessage(message);
   const locale = localeForInput(input, current.locale);
+  const chatbotServices = normalizePublishedRecords('citizens_charter_service', services, options);
+  const chatbotFaqs = normalizePublishedRecords('faq', faqs, options);
 
   if (!input || input === 'BACK_TO_START') {
     return withAnalytics({
       session: { ...createInitialSession(), state: 'selecting_service', locale },
-      replies: [serviceListAllReply(services, locale)],
+      replies: [serviceListAllReply(chatbotServices, locale)],
     });
   }
 
@@ -375,13 +376,13 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
   if (input === 'BACK_TO_SERVICES' && current.audience) {
     return withAnalytics({
       session: { ...current, locale, state: 'selecting_service' },
-      replies: [serviceListAllReply(services, locale)],
+      replies: [serviceListAllReply(chatbotServices, locale)],
     });
   }
 
   if (input.startsWith('SERVICE_')) {
     const serviceId = input.slice('SERVICE_'.length);
-    const service = findServiceById(serviceId, services);
+    const service = findServiceById(serviceId, chatbotServices);
     if (!service) {
       return withAnalytics(
         {
@@ -425,12 +426,12 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
   ) {
     return withAnalytics({
       session: { ...current, locale, state: 'selecting_service' },
-      replies: [serviceListAllReply(services, locale)],
+      replies: [serviceListAllReply(chatbotServices, locale)],
     });
   }
   // previous audience selection removed: always show services list or match by free text
 
-  const faqMatches = searchFaqs(input, faqs);
+  const faqMatches = searchFaqs(input, chatbotFaqs);
   if (faqMatches.length > 0) {
     return withAnalytics(
       {
@@ -445,7 +446,7 @@ function handleUserMessage(session, message, services = loadServices(), faqs = [
     );
   }
 
-  const matches = searchServices(input, services);
+  const matches = searchServices(input, chatbotServices);
   if (matches.length > 0) {
     const service = matches[0];
     return withAnalytics(

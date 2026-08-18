@@ -73,14 +73,18 @@ function createAdminServer({ pool, redis }) {
 }
 
 async function sessionCookie(redis, user = {}) {
-  const session = await createSession(redis, {
-    id: 10,
-    office_id: 1,
-    email: 'admin@slsu.edu.ph',
-    full_name: 'Bootstrap Admin',
-    role: 'admin',
-    ...user,
-  });
+  const session = await createSession(
+    redis,
+    {
+      id: 10,
+      office_id: 1,
+      email: 'admin@slsu.edu.ph',
+      full_name: 'Bootstrap Admin',
+      role: 'admin',
+      ...user,
+    },
+    { sessionSecret: 'test-session-secret' },
+  );
 
   return {
     key: session.key,
@@ -221,7 +225,9 @@ test('role gates allow office dashboards while blocking admin-only review routes
 
     assert.equal(dashboard.status, 200);
     assert.match(dashboardHtml, /Office dashboard/);
-    assert.match(dashboardHtml, /Submit new content/);
+    assert.match(dashboardHtml, /Enroll a process/);
+    assert.match(dashboardHtml, /href="\/admin\/processes\/new"/);
+    assert.match(dashboardHtml, /Submit other content/);
     assert.equal(reviews.status, 403);
     assert.match(reviewsHtml, /do not have access/);
     assert.doesNotMatch(reviewsHtml, /Content reviews/);

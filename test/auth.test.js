@@ -98,6 +98,33 @@ test('getSession loads a valid session from a cookie header', async () => {
   assert.deepEqual(session.user, { id: 9, email: 'office@slsu.edu.ph' });
 });
 
+test('signed session cookies support current/previous secret rotation and reject tampering', async () => {
+  const redis = new FakeRedis();
+  const created = await createSession(
+    redis,
+    { id: 9, email: 'office@slsu.edu.ph' },
+    { sessionSecret: 'previous-secret' },
+  );
+  const cookie = `${AICO_SESSION_COOKIE}=${created.cookieValue}`;
+
+  assert.match(created.cookieValue, new RegExp(`^${created.sessionId}\\.[A-Za-z0-9_-]+$`));
+  assert.ok(
+    await getSession(redis, cookie, {
+      sessionSecrets: ['current-secret', 'previous-secret'],
+    }),
+  );
+  assert.equal(await getSession(redis, cookie, { sessionSecrets: ['current-secret'] }), null);
+
+  const replacement = created.cookieValue.endsWith('A') ? 'B' : 'A';
+  const tamperedCookie = `${AICO_SESSION_COOKIE}=${created.cookieValue.slice(0, -1)}${replacement}`;
+  assert.equal(
+    await getSession(redis, tamperedCookie, {
+      sessionSecrets: ['current-secret', 'previous-secret'],
+    }),
+    null,
+  );
+});
+
 test('getSession falls back to the process session shadow when Redis is unavailable', async () => {
   const redis = new FakeRedis();
   const created = await createSession(redis, { id: 9, email: 'office@slsu.edu.ph' });

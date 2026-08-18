@@ -103,6 +103,7 @@ UX requirements:
 - Published content should be marked as available to the chatbot.
 - Pending review, needs revision, rejected, draft, and archived items should be visibly excluded from chatbot answers.
 - Admin approval should invalidate the published-content cache as it does today.
+- Published chatbot caches should expire after about 10 minutes, use TTL jitter to avoid synchronized expiry, and collapse same-key cache misses into a single in-process PostgreSQL fill.
 - Dashboards and content inventory should distinguish published records from working submissions.
 
 ## Information Architecture

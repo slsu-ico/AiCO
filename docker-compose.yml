@@ -35,6 +35,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      NODE_ENV: development
       PORT: 3000
       MESSENGER_VERIFY_TOKEN: dev-verify-token
       PAGE_ACCESS_TOKEN: replace-with-your-facebook-page-access-token

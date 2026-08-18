@@ -2,8 +2,7 @@ param(
   [string]$Scope = 'slsu-icos-projects'
 )
 
-# This helper deploys the app to Vercel production after configuring any environment variables
-# that are already present in the current PowerShell session.
+# This helper deploys the app after configuring only non-secret Vault bootstrap variables.
 
 Write-Host "Deploying production app for scope: $Scope"
 
@@ -14,7 +13,7 @@ if (-not (Test-Path $envHelper)) {
   exit 1
 }
 
-Write-Host 'Adding available environment variables to Vercel production...'
+Write-Host 'Adding non-secret Vault bootstrap variables to Vercel production...'
 & $envHelper -Scope $Scope
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'Environment setup failed.'
@@ -22,10 +21,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Deploying to Vercel production...'
-corepack pnpm dlx vercel --prod --yes
-if ($LASTEXITCODE -ne 0) {
+$deployExitCode = 0
+Push-Location (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+try {
+  corepack pnpm dlx vercel --prod --yes --scope $Scope
+  $deployExitCode = $LASTEXITCODE
+}
+finally {
+  Pop-Location
+}
+if ($deployExitCode -ne 0) {
   Write-Error 'Vercel deployment failed.'
-  exit $LASTEXITCODE
+  exit $deployExitCode
 }
 
 Write-Host 'Deployment completed. Verify the production URL and webhook settings in Vercel.'

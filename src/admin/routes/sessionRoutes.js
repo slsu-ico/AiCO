@@ -18,6 +18,7 @@ async function handleSessionRoutes(context) {
         pool: services.pool,
         redis: services.redis,
         secureCookies,
+        sessionSecrets: services.sessionSecrets,
       });
       return true;
     }
@@ -31,7 +32,9 @@ async function handleSessionRoutes(context) {
       return true;
     }
 
-    await destroySession(services.redis, request.headers.cookie || '');
+    await destroySession(services.redis, request.headers.cookie || '', {
+      sessionSecrets: services.sessionSecrets,
+    });
     response.writeHead(303, {
       location: '/login',
       'set-cookie': clearSessionCookie({ secure: secureCookies }),

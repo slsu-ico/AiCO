@@ -7,10 +7,16 @@ const ICO_OFFICE_NAME = 'Information and Communications Office';
 const ICO_OFFICE_ABBREVIATION = 'ICO';
 const SERVICE_CONTENT_TYPE = 'citizens_charter_service';
 const SEED_LOCK_KEY = 'seed:initial-data';
+const BOOTSTRAP_PASSWORD_MIN_LENGTH = 12;
 
 function requireBootstrapAdminPassword(password) {
   if (typeof password !== 'string' || password.trim() === '') {
     throw new Error('bootstrapAdminPassword is required to seed the bootstrap admin account.');
+  }
+  if (password.length < BOOTSTRAP_PASSWORD_MIN_LENGTH) {
+    throw new Error(
+      `bootstrapAdminPassword must be at least ${BOOTSTRAP_PASSWORD_MIN_LENGTH} characters.`,
+    );
   }
 }
 
@@ -76,19 +82,17 @@ async function ensureBootstrapAdmin(client, officeId, options) {
   return inserted.rows[0].id;
 }
 
-async function findExistingPublishedService(client, officeId, serviceId) {
+async function findExistingPublishedService(client, serviceId) {
   const result = await client.query(
     `
       SELECT ci.id
       FROM content_items ci
-      JOIN content_versions cv ON cv.id = ci.current_published_version_id
-      WHERE ci.office_id = $1
-        AND ci.content_type = $2
-        AND cv.status = 'published'
-        AND cv.structured_payload->>'id' = $3
+      WHERE ci.active = true
+        AND ci.content_type = $1
+        AND ci.published_service_id = $2
       LIMIT 1
     `,
-    [officeId, SERVICE_CONTENT_TYPE, serviceId],
+    [SERVICE_CONTENT_TYPE, serviceId],
   );
 
   return result.rows[0] || null;
@@ -140,10 +144,11 @@ async function insertPublishedService(client, officeId, adminId, service) {
     `
       UPDATE content_items
       SET current_published_version_id = $1,
+          published_service_id = $2,
           updated_at = now()
-      WHERE id = $2
+      WHERE id = $3
     `,
-    [versionId, itemId],
+    [versionId, service.id, itemId],
   );
 }
 
@@ -163,7 +168,7 @@ async function seedInitialData(pool, options = {}) {
     let servicesSkipped = 0;
 
     for (const service of services) {
-      const existing = await findExistingPublishedService(client, officeId, service.id);
+      const existing = await findExistingPublishedService(client, service.id);
       if (existing) {
         servicesSkipped += 1;
         continue;

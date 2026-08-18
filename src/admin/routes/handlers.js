@@ -3,11 +3,17 @@ const {
   FIELD_LABELS,
   FIELD_LIMITS,
   LIST_PAGE_SIZE,
+  TEMPORARY_PASSWORD_MIN_LENGTH,
   VALID_ATTACHMENT_LINKED_TYPES,
   VALID_CONTENT_TYPES,
   VALID_ROLES,
 } = require('../../adminConstants');
-const { likePattern, listStateFromUrl, noticeText, totalFromRows } = require('../../adminListState');
+const {
+  likePattern,
+  listStateFromUrl,
+  noticeText,
+  totalFromRows,
+} = require('../../adminListState');
 const { readMultipartForm } = require('../../adminMultipart');
 const {
   renderAccountRequest,
@@ -22,13 +28,11 @@ const {
   renderPagination,
   renderUserManagement,
 } = require('../../adminViews');
-const {
-  createSession,
-  getSession,
-  hashPassword,
-  verifyPassword,
-} = require('../../auth');
+const { createSession, getSession, hashPassword, verifyPassword } = require('../../auth');
+const { deleteKey } = require('../../cache/redis');
+const { createInitialSession, handleUserMessage } = require('../../conversationEngine');
 const { withTransaction } = require('../../db/postgres');
+const { normalizeContentPayload } = require('../../contentPayload');
 const {
   escapeHtml,
   notFound,
@@ -48,6 +52,15 @@ const { warmPublishedContentCache } = require('../../publishedContentRepository'
 
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_TTL_SECONDS = 15 * 60;
+const CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH = 2000;
+const CHATBOT_PREVIEW_MAX_SESSION_LENGTH = 4096;
+const CHATBOT_PREVIEW_STATES = new Set([
+  'new',
+  'selecting_service',
+  'viewing_service',
+  'viewing_faq',
+  'handoff',
+]);
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -141,13 +154,117 @@ async function readMetadata(request) {
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
+    'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
+    'x-content-type-options': 'nosniff',
   });
   response.end(JSON.stringify(payload));
 }
 
-async function currentSession(redis, request) {
-  return getSession(redis, request.headers.cookie || '');
+function parseChatbotPreviewSession(value) {
+  const initial = createInitialSession();
+  if (value === undefined || value === '') return initial;
+  if (typeof value !== 'string' || value.length > CHATBOT_PREVIEW_MAX_SESSION_LENGTH) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  const state = clean(parsed.state || initial.state);
+  const audience =
+    parsed.audience === null || parsed.audience === undefined ? null : clean(parsed.audience);
+  const lastServiceId =
+    parsed.lastServiceId === null || parsed.lastServiceId === undefined
+      ? null
+      : clean(parsed.lastServiceId);
+  const locale = clean(parsed.locale || initial.locale);
+
+  if (!CHATBOT_PREVIEW_STATES.has(state)) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (audience !== null && audience !== 'internal' && audience !== 'external') {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (
+    lastServiceId !== null &&
+    (lastServiceId.length > FIELD_LIMITS.service_id ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(lastServiceId))
+  ) {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+  if (locale !== 'en' && locale !== 'fil') {
+    throw new Error('Preview session is invalid. Reset the preview and try again.');
+  }
+
+  return { state, audience, lastServiceId, locale };
+}
+
+async function handleChatbotPreviewMessage({ response, form, loadChatbotContent, logger }) {
+  if (typeof form.message !== 'string') {
+    sendJson(response, 400, { error: 'Enter a message to preview.' });
+    return;
+  }
+
+  const message = form.message.trim();
+  if (!message) {
+    sendJson(response, 400, { error: 'Enter a message to preview.' });
+    return;
+  }
+  if (message.length > CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH) {
+    sendJson(response, 400, {
+      error: `Preview messages must be ${CHATBOT_PREVIEW_MAX_MESSAGE_LENGTH.toLocaleString('en-US')} characters or fewer.`,
+    });
+    return;
+  }
+
+  let session;
+  try {
+    session = parseChatbotPreviewSession(form.session);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (typeof loadChatbotContent !== 'function') {
+    sendJson(response, 503, { error: 'Live preview is temporarily unavailable.' });
+    return;
+  }
+
+  try {
+    const content = await loadChatbotContent();
+    const services = Array.isArray(content?.services) ? content.services : [];
+    const faqs = Array.isArray(content?.faqs) ? content.faqs : [];
+    const result = handleUserMessage(session, message, services, faqs);
+
+    sendJson(response, 200, {
+      session: result.session,
+      replies: result.replies,
+      published: {
+        services: services.length,
+        faqs: faqs.length,
+      },
+    });
+  } catch (error) {
+    logger?.error({
+      msg: 'chatbot_preview_failed',
+      requestId: response.getHeader('x-request-id'),
+      error: error.message || String(error),
+    });
+    sendJson(response, 503, { error: 'Live preview is temporarily unavailable.' });
+  }
+}
+
+async function currentSession(redis, request, sessionSecrets) {
+  return getSession(redis, request.headers.cookie || '', { sessionSecrets });
 }
 
 function getClientIp(request) {
@@ -192,7 +309,7 @@ function renderTooManyLoginAttempts(response) {
   );
 }
 
-async function handleLoginPost({ request, response, pool, redis, secureCookies }) {
+async function handleLoginPost({ request, response, pool, redis, secureCookies, sessionSecrets }) {
   const form = await readForm(request);
   const email = clean(form.email).toLowerCase();
   const password = String(form.password ?? '');
@@ -237,7 +354,7 @@ async function handleLoginPost({ request, response, pool, redis, secureCookies }
       name: user.full_name,
       role: user.role,
     },
-    { secure: secureCookies },
+    { secure: secureCookies, sessionSecrets },
   );
 
   response.writeHead(303, {
@@ -309,8 +426,8 @@ async function handleRequestAccountPost({ request, response, pool }) {
   redirect(response, '/request-account?submitted=1');
 }
 
-async function requireAdmin({ request, response, redis }) {
-  const session = await currentSession(redis, request);
+async function requireAdmin({ request, response, redis, sessionSecrets }) {
+  const session = await currentSession(redis, request, sessionSecrets);
   if (!session?.user) {
     redirect(response, '/login');
     return null;
@@ -552,25 +669,62 @@ async function handleAccountRequestsIndex({ response, pool, user, url }) {
   );
 }
 
+function contentTitleAndBody(form, contentType) {
+  if (contentType === 'citizens_charter_service') {
+    return {
+      title: clean(form.service_name || form.title),
+      body: clean(form.description || form.body),
+    };
+  }
+
+  if (contentType === 'faq') {
+    return {
+      title: clean(form.question || form.title),
+      body: clean(form.answer || form.body),
+    };
+  }
+
+  return {
+    title: clean(form.title),
+    body: clean(form.body),
+  };
+}
+
+function renderConflict(response, message, user = null) {
+  sendHtml(
+    response,
+    409,
+    pageLayout({
+      title: 'Conflict',
+      user,
+      body: `<p>${escapeHtml(message)}</p>`,
+    }),
+  );
+}
+
 function buildContentPayload({ form, user, contentType, title, body }) {
-  const payload = {
+  if (contentType === 'citizens_charter_service' || contentType === 'faq') {
+    return normalizeContentPayload(contentType, { ...form, title, body });
+  }
+
+  return {
     title,
     body,
     office_id: Number(user.office_id),
     content_type: contentType,
   };
-
-  if (contentType === 'citizens_charter_service') {
-    for (const key of ['requirements', 'procedure', 'fees', 'processing_time', 'service_name']) {
-      const value = clean(form[key]);
-      if (value) payload[key] = value;
-    }
-  }
-
-  return payload;
 }
 
-async function handleContentSubmit({ request, response, pool, user, uploadDir, csrfProtection }) {
+async function handleContentSubmit({
+  request,
+  response,
+  pool,
+  user,
+  uploadDir,
+  csrfProtection,
+  contentTypeOverride = '',
+  successLocation = '/admin/content/new?submitted=1',
+}) {
   let submitted;
   try {
     submitted = await readContentForm(request);
@@ -585,11 +739,23 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
   const lengthError = validateFieldLengths(form, [
     'title',
     'body',
+    'service_id',
+    'description',
+    'office_or_unit',
+    'classification',
+    'transaction_type',
+    'who_may_avail',
     'requirements',
+    'submission_timeline',
     'procedure',
+    'official_link',
     'fees',
     'processing_time',
     'service_name',
+    'css_reminder',
+    'question',
+    'answer',
+    'keywords',
   ]);
   if (lengthError) {
     renderBadRequest(response, lengthError, user);
@@ -599,9 +765,7 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
   const attachment = submitted.attachment;
   const officeId = Number(user.office_id);
   const requestedOfficeId = clean(form.office_id);
-  const contentType = clean(form.content_type);
-  const title = clean(form.title);
-  const body = clean(form.body);
+  const contentType = contentTypeOverride || clean(form.content_type);
 
   if (!Number.isInteger(officeId) || officeId < 1) {
     renderForbidden(response, user, 'Content can only be submitted for an assigned office.');
@@ -618,8 +782,16 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     return;
   }
 
+  const { title, body } = contentTitleAndBody(form, contentType);
+
   if (!title || !body) {
-    renderBadRequest(response, 'Title and body are required.', user);
+    const message =
+      contentType === 'faq'
+        ? 'FAQ question and answer are required.'
+        : contentType === 'citizens_charter_service'
+          ? 'Service name and description are required.'
+          : 'Title and body are required.';
+    renderBadRequest(response, message, user);
     return;
   }
 
@@ -628,7 +800,16 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     return;
   }
 
-  const payload = buildContentPayload({ form, user, contentType, title, body });
+  let payload;
+  try {
+    payload = buildContentPayload({ form, user, contentType, title, body });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      renderBadRequest(response, error.message, user);
+      return;
+    }
+    throw error;
+  }
 
   await withTransaction(pool, async (client) => {
     const itemResult = await client.query(
@@ -700,7 +881,7 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     }
   });
 
-  redirect(response, '/admin/content/new?submitted=1');
+  redirect(response, successLocation);
 }
 
 async function handleAttachmentMetadataCreate({ request, response, pool, user }) {
@@ -834,6 +1015,8 @@ async function handleContentReviewsIndex({ response, pool, user, url }) {
   const offsetParam = params.length;
   const notice = noticeText(state.notice, {
     approved: 'Content approved and published.',
+    approved_cache_pending:
+      'Content approved and published, but the shared chatbot cache could not be refreshed. Retry the cache refresh action.',
     rejected: 'Content rejected.',
     needs_revision: 'Content returned for revision.',
   });
@@ -1052,17 +1235,25 @@ async function handleUsersIndex({ response, pool, user, url }) {
   );
 }
 
-async function handleUserActivation({ response, pool, id, active }) {
-  await pool.query(
-    `
-      UPDATE users
-      SET active = $2,
-          updated_at = now()
-      WHERE id = $1
-      RETURNING id
-    `,
-    [id, active],
-  );
+async function handleUserActivation({ response, pool, user, id, active }) {
+  try {
+    await pool.query(
+      `
+        UPDATE users
+        SET active = $2,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [id, active],
+    );
+  } catch (error) {
+    if (active && error.code === '23505') {
+      renderConflict(response, 'An active user already exists with this email address.', user);
+      return;
+    }
+    throw error;
+  }
 
   redirect(response, `/admin/users?notice=${active ? 'reactivated' : 'deactivated'}`);
 }
@@ -1102,9 +1293,16 @@ async function handleUserAssignment({ request, response, pool, user, id, csrfPro
 async function lockContentVersion(client, id) {
   const result = await client.query(
     `
-      SELECT id, content_item_id, status
-      FROM content_versions
-      WHERE id = $1
+      SELECT cv.id,
+             cv.content_item_id,
+             cv.status,
+             cv.title,
+             cv.body,
+             cv.structured_payload,
+             ci.content_type
+      FROM content_versions cv
+      JOIN content_items ci ON ci.id = cv.content_item_id
+      WHERE cv.id = $1
       FOR UPDATE
     `,
     [id],
@@ -1126,9 +1324,25 @@ async function lockContentVersion(client, id) {
   return version;
 }
 
+function payloadForPublication(version) {
+  const payload =
+    version.structured_payload && typeof version.structured_payload === 'object'
+      ? version.structured_payload
+      : {};
+
+  if (version.content_type !== 'citizens_charter_service' && version.content_type !== 'faq') {
+    return payload;
+  }
+
+  return normalizeContentPayload(version.content_type, {
+    ...payload,
+    title: payload.title || version.title,
+    body: payload.body || version.body,
+  });
+}
+
 async function invalidatePublishedCache(redis) {
-  await redis.del('published:services');
-  await redis.del('published:faqs');
+  await Promise.all([deleteKey(redis, 'published:services'), deleteKey(redis, 'published:faqs')]);
 }
 
 async function handleCacheRefresh({ response, pool, redis }) {
@@ -1138,44 +1352,67 @@ async function handleCacheRefresh({ response, pool, redis }) {
 }
 
 async function handleContentApprove({ response, pool, redis, user, id, notificationMailer }) {
-  await withTransaction(pool, async (client) => {
-    const version = await lockContentVersion(client, id);
+  try {
+    await withTransaction(pool, async (client) => {
+      const version = await lockContentVersion(client, id);
+      const payload = payloadForPublication(version);
 
-    await client.query(
-      `
-        UPDATE content_versions
-        SET status = 'published',
-            reviewed_by = $2,
-            reviewed_at = now(),
-            published_at = now(),
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id, content_item_id
-      `,
-      [id, user.id],
-    );
+      await client.query(
+        `
+          UPDATE content_versions
+          SET status = 'published',
+              reviewed_by = $2,
+              structured_payload = $3,
+              reviewed_at = now(),
+              published_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id, content_item_id
+        `,
+        [id, user.id, payload],
+      );
 
-    await client.query(
-      `
-        UPDATE content_items
-        SET current_published_version_id = $2,
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [version.content_item_id, id],
-    );
-  });
+      await client.query(
+        `
+          UPDATE content_items
+          SET current_published_version_id = $2,
+              published_service_id = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id
+        `,
+        [
+          version.content_item_id,
+          id,
+          version.content_type === 'citizens_charter_service' ? payload.id : null,
+        ],
+      );
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      error.statusCode = 409;
+      error.message = 'A published service already uses this service ID.';
+    }
+    throw error;
+  }
 
-  await invalidatePublishedCache(redis);
-  await warmPublishedContentCache({ pool, redis });
+  let cacheRefreshPending = false;
+  try {
+    await invalidatePublishedCache(redis);
+    await warmPublishedContentCache({ pool, redis });
+  } catch {
+    cacheRefreshPending = true;
+  }
   await notifyContentReviewDecision({
     notificationMailer,
     pool,
     id,
     status: 'published',
   });
-  redirect(response, '/admin/reviews?notice=approved');
+  redirect(
+    response,
+    `/admin/reviews?notice=${cacheRefreshPending ? 'approved_cache_pending' : 'approved'}`,
+  );
 }
 
 async function handleContentReviewStatus({
@@ -1307,61 +1544,94 @@ async function handleApprove({ request, response, pool, user, id, csrfProtection
     return;
   }
 
-  await withTransaction(pool, async (client) => {
-    const requestResult = await client.query(
-      `
-        SELECT id, full_name, email, status
-        FROM account_requests
-        WHERE id = $1
-        FOR UPDATE
-      `,
-      [id],
+  if (password.length < TEMPORARY_PASSWORD_MIN_LENGTH) {
+    renderBadRequest(
+      response,
+      `Temporary password must be at least ${TEMPORARY_PASSWORD_MIN_LENGTH} characters.`,
+      user,
     );
-    const accountRequest = requestResult.rows[0];
+    return;
+  }
 
-    if (!accountRequest) {
-      const error = new Error('Account request not found.');
-      error.statusCode = 404;
-      throw error;
+  try {
+    await withTransaction(pool, async (client) => {
+      const requestResult = await client.query(
+        `
+          SELECT id, full_name, email, status
+          FROM account_requests
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [id],
+      );
+      const accountRequest = requestResult.rows[0];
+
+      if (!accountRequest) {
+        const error = new Error('Account request not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (accountRequest.status !== 'pending') {
+        const error = new Error('Only pending account requests can be approved.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const existingUser = await client.query(
+        `
+          SELECT id
+          FROM users
+          WHERE active = true
+            AND lower(email) = lower($1)
+          LIMIT 1
+        `,
+        [accountRequest.email],
+      );
+      if (existingUser.rows[0]) {
+        const error = new Error('An active user already exists with this email address.');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      await client.query(
+        `
+          INSERT INTO users (office_id, email, password_hash, full_name, role, active)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id
+        `,
+        [
+          officeId,
+          accountRequest.email,
+          hashPassword(password),
+          accountRequest.full_name,
+          role,
+          true,
+        ],
+      );
+
+      await client.query(
+        `
+          UPDATE account_requests
+          SET status = 'approved',
+              office_id = $4,
+              reviewed_by = $2,
+              reviewed_at = now(),
+              admin_note = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id
+        `,
+        [id, user.id, adminNote, officeId],
+      );
+    });
+  } catch (error) {
+    if (error.statusCode === 409 || error.code === '23505') {
+      renderConflict(response, 'An active user already exists with this email address.', user);
+      return;
     }
-
-    if (accountRequest.status !== 'pending') {
-      const error = new Error('Only pending account requests can be approved.');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    await client.query(
-      `
-        INSERT INTO users (office_id, email, password_hash, full_name, role, active)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-      `,
-      [
-        officeId,
-        accountRequest.email,
-        hashPassword(password),
-        accountRequest.full_name,
-        role,
-        true,
-      ],
-    );
-
-    await client.query(
-      `
-        UPDATE account_requests
-        SET status = 'approved',
-            office_id = $4,
-            reviewed_by = $2,
-            reviewed_at = now(),
-            admin_note = $3,
-            updated_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [id, user.id, adminNote, officeId],
-    );
-  });
+    throw error;
+  }
 
   redirect(response, '/admin/account-requests?notice=approved');
 }
@@ -1405,6 +1675,7 @@ module.exports = {
   handleApprove,
   handleAttachmentMetadataCreate,
   handleCacheRefresh,
+  handleChatbotPreviewMessage,
   handleContentApprove,
   handleContentHistory,
   handleContentReviewDetail,
@@ -1431,4 +1702,3 @@ module.exports = {
   requireServices,
   validateCsrf,
 };
-

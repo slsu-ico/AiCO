@@ -2,6 +2,7 @@ const {
   CONTENT_TYPE_LABELS,
   FIELD_LIMITS,
   LIST_PAGE_SIZE,
+  TEMPORARY_PASSWORD_MIN_LENGTH,
   VALID_CONTENT_TYPES,
   VALID_ROLES,
 } = require('./adminConstants');
@@ -280,7 +281,10 @@ function renderOfficeDashboard(user, submissions, options = {}) {
         ${renderOfficeSubmissionRows(submissions)}
         ${renderPagination({ state, total })}
       </section>
-      <p><a class="button" href="/admin/content/new">Submit new content</a></p>
+      <p class="form-actions">
+        <a class="button" href="/admin/processes/new">Enroll a process</a>
+        <a class="button button-secondary" href="/admin/content/new">Submit other content</a>
+      </p>
     `,
   });
 }
@@ -330,7 +334,7 @@ function renderAccountRequestRows(rows, user) {
             <option value="office_user">Office user</option>
             <option value="admin">Admin</option>
           </select>
-          <input name="password" type="password" maxlength="${FIELD_LIMITS.password}" placeholder="Temporary password" required>
+          <input name="password" type="password" minlength="${TEMPORARY_PASSWORD_MIN_LENGTH}" maxlength="${FIELD_LIMITS.password}" autocomplete="new-password" placeholder="Temporary password (${TEMPORARY_PASSWORD_MIN_LENGTH}+ characters)" required>
           <button type="submit">Approve</button>
         </form>
         <form method="post" action="/admin/account-requests/${escapeHtml(request.id)}/reject">
@@ -381,6 +385,58 @@ function contentTypeOptions(selected = '') {
     .join('');
 }
 
+function renderCitizenCharterFields() {
+  return `
+    ${field('Service ID', 'service_id', { required: true, maxlength: FIELD_LIMITS.service_id })}
+    <label>Audience
+      <select id="audience" name="audience" required>
+        <option value="internal">Internal SLSU unit/office</option>
+        <option value="external">External partner</option>
+      </select>
+    </label>
+    ${field('Process or service name', 'service_name', { required: true, maxlength: FIELD_LIMITS.service_name })}
+    ${field('Description', 'description', { multiline: true, required: true, maxlength: FIELD_LIMITS.description })}
+    ${field('Responsible office or unit', 'office_or_unit', { required: true, maxlength: FIELD_LIMITS.office_or_unit })}
+    ${field('Classification', 'classification', { required: true, maxlength: FIELD_LIMITS.classification })}
+    ${field('Transaction type (optional)', 'transaction_type', { maxlength: FIELD_LIMITS.transaction_type })}
+    ${field('Who may avail', 'who_may_avail', { required: true, maxlength: FIELD_LIMITS.who_may_avail })}
+    ${field('Requirements — one per line', 'requirements', { multiline: true, required: true, maxlength: FIELD_LIMITS.requirements })}
+    ${field('Procedure or submission timeline — one step per line', 'submission_timeline', { multiline: true, required: true, maxlength: FIELD_LIMITS.submission_timeline })}
+    ${field('Official information or request link', 'official_link', { type: 'url', required: true, maxlength: FIELD_LIMITS.official_link })}
+    ${field('Fees', 'fees', { required: true, maxlength: FIELD_LIMITS.fees })}
+    ${field('Processing time', 'processing_time', { required: true, maxlength: FIELD_LIMITS.processing_time })}
+    ${field('Client Satisfaction Survey reminder', 'css_reminder', { multiline: true, required: true, maxlength: FIELD_LIMITS.css_reminder })}
+  `;
+}
+
+function renderNewProcessForm({ user, notice = '' }) {
+  return pageLayout({
+    title: 'Enroll a new process',
+    activePath: '/admin/processes/new',
+    user,
+    notice,
+    body: `
+      <section class="panel-section" aria-labelledby="process-form-guidance">
+        <h2 id="process-form-guidance">Before you submit</h2>
+        <p>Enter the approved Citizen's Charter information for one process. The submission remains pending until an administrator reviews and publishes it.</p>
+        <p class="form-help">Use a permanent, globally unique service ID with lowercase letters, numbers, and single hyphens, such as <code>external-media-coverage-request</code>.</p>
+      </section>
+      <form method="post" action="/admin/processes">
+        ${csrfInput(user)}
+        <fieldset>
+          <legend>Citizen's Charter process</legend>
+          ${renderCitizenCharterFields()}
+        </fieldset>
+        <p class="form-help">Use the official link above as the durable source of truth for the published process.</p>
+        <div class="form-actions">
+          <button type="submit">Submit process for review</button>
+          <a class="button button-secondary" href="/admin/submissions">View submissions</a>
+        </div>
+      </form>
+    `,
+  });
+}
+
 function renderNewContentForm({ user, notice = '' }) {
   return pageLayout({
     title: 'New content',
@@ -396,19 +452,56 @@ function renderNewContentForm({ user, notice = '' }) {
             ${contentTypeOptions()}
           </select>
         </label>
-        ${field('Title', 'title', { required: true, maxlength: FIELD_LIMITS.title })}
-        ${field('Body', 'body', { multiline: true, required: true, maxlength: FIELD_LIMITS.body })}
-        ${field('Requirements', 'requirements', { multiline: true, maxlength: FIELD_LIMITS.requirements })}
-        ${field('Procedure', 'procedure', { multiline: true, maxlength: FIELD_LIMITS.procedure })}
-        ${field('Fees', 'fees', { maxlength: FIELD_LIMITS.fees })}
-        ${field('Processing time', 'processing_time', { maxlength: FIELD_LIMITS.processing_time })}
+        <fieldset data-content-fields="citizens_charter_service">
+          <legend>Citizen's Charter chatbot record</legend>
+          <p>Enter one requirement or submission reminder per line. The service ID is a stable identifier such as <code>internal-layout-request</code>.</p>
+          ${renderCitizenCharterFields()}
+        </fieldset>
+        <fieldset data-content-fields="faq" hidden disabled>
+          <legend>FAQ chatbot record</legend>
+          ${field('Question', 'question', { required: true, maxlength: FIELD_LIMITS.question })}
+          ${field('Answer', 'answer', { multiline: true, required: true, maxlength: FIELD_LIMITS.answer })}
+          ${field('Search keywords (comma-separated)', 'keywords', { maxlength: FIELD_LIMITS.keywords })}
+        </fieldset>
+        <fieldset data-content-fields="generic" hidden disabled>
+          <legend>General content</legend>
+          ${field('Title', 'title', { required: true, maxlength: FIELD_LIMITS.title })}
+          ${field('Body', 'body', { multiline: true, required: true, maxlength: FIELD_LIMITS.body })}
+        </fieldset>
         <label>Supporting file
           <input id="attachment" name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
         </label>
         <button type="submit">Submit for review</button>
       </form>
+      <script src="/admin/content-form.js"></script>
     `,
   });
+}
+
+function renderContentFormScript() {
+  return `
+'use strict';
+(() => {
+  const select = document.getElementById('content_type');
+  const groups = document.querySelectorAll('[data-content-fields]');
+  if (!select || groups.length === 0) return;
+
+  const updateFields = () => {
+    const selectedGroup =
+      select.value === 'citizens_charter_service' || select.value === 'faq'
+        ? select.value
+        : 'generic';
+    groups.forEach((group) => {
+      const active = group.dataset.contentFields === selectedGroup;
+      group.hidden = !active;
+      group.disabled = !active;
+    });
+  };
+
+  select.addEventListener('change', updateFields);
+  updateFields();
+})();
+`;
 }
 
 function renderContentReviewRows(rows) {
@@ -596,9 +689,7 @@ function officeOptions(offices, selectedOfficeId) {
 }
 
 function roleOptions(selectedRole) {
-  return [...VALID_ROLES]
-    .map((role) => option(role, formatStatus(role), selectedRole))
-    .join('');
+  return [...VALID_ROLES].map((role) => option(role, formatStatus(role), selectedRole)).join('');
 }
 
 function renderUserManagement(users, offices, user, options = {}) {
@@ -665,25 +756,30 @@ function renderUserManagement(users, offices, user, options = {}) {
 
 function renderChatbotDemo(user) {
   return pageLayout({
-    title: 'AiCO chatbot demo',
+    title: 'AiCO chatbot live preview',
     activePath: '/admin/chatbot-demo',
     user,
-    subtitle: 'Local simulator for common ICO service questions',
+    subtitle: 'Preview the same published content and conversation engine used by Messenger',
     body: `
-      <section class="chat-demo-shell" aria-label="AiCO chatbot demo">
+      <section class="panel-section" aria-labelledby="chat-preview-note">
+        <h2 id="chat-preview-note">Currently published content</h2>
+        <p>This preview reads the live chatbot service and FAQ cache. Pending submissions appear here only after an administrator approves and publishes them.</p>
+      </section>
+      <section class="chat-demo-shell" aria-label="AiCO chatbot live preview">
         <div class="chat-demo-header">
           <div class="chat-demo-avatar">ICO</div>
           <div>
             <strong>ICO Services Assistant</strong>
-            <span>Southern Luzon State University</span>
+            <span id="chat-demo-status" aria-live="polite">Loading published content…</span>
           </div>
           <button class="chat-demo-reset" id="chat-demo-reset" type="button">Reset</button>
         </div>
         <div class="chat-demo-messages" id="chat-demo-messages" aria-live="polite"></div>
         <div class="quick-replies" id="chat-demo-quick-replies" aria-label="Suggested questions"></div>
-        <form class="chat-demo-input" id="chat-demo-form">
+        <form class="chat-demo-input" id="chat-demo-form" method="post" action="/admin/chatbot-demo/message">
+          ${csrfInput(user)}
           <label class="sr-only" for="chat-demo-input">Message</label>
-          <input id="chat-demo-input" name="message" autocomplete="off" placeholder='Try "I need an AVP" or "request layout design"'>
+          <input id="chat-demo-input" name="message" autocomplete="off" maxlength="2000" placeholder="Type a published service name or question">
           <button type="submit">Send</button>
         </form>
       </section>
@@ -700,31 +796,16 @@ function renderChatbotDemoScript() {
   const form = document.getElementById('chat-demo-form');
   const input = document.getElementById('chat-demo-input');
   const reset = document.getElementById('chat-demo-reset');
-  const quickReplies = [
-    'Request AVP production',
-    'Request layout design',
-    'Social media guidelines',
-    'Processing time',
-  ];
+  const submit = form?.querySelector('button[type="submit"]');
+  const csrf = form?.querySelector('input[name="_csrf"]');
+  const status = document.getElementById('chat-demo-status');
 
-  if (!messages || !replies || !form || !input || !reset) return;
+  if (!messages || !replies || !form || !input || !reset || !submit || !csrf || !status) return;
 
-  const responseFor = (text) => {
-    const value = text.toLowerCase();
-    if (value.includes('avp') || value.includes('video')) {
-      return 'For AVP production, prepare the approved request letter, event details, target date, and available reference materials. Processing may take up to 17 working days depending on scope.';
-    }
-    if (value.includes('layout') || value.includes('template') || value.includes('design')) {
-      return 'For layout design requests, submit your content draft, required size, deadline, and office contact person. AiCO can guide you to the ICO templates and requirements.';
-    }
-    if (value.includes('social') || value.includes('posting') || value.includes('guideline')) {
-      return 'For social media posting, use official SLSU templates and prepare caption copy, publication date, and any approved photos or attachments.';
-    }
-    if (value.includes('time') || value.includes('deadline') || value.includes('processing')) {
-      return 'Processing time depends on the service type. AiCO can show the published Citizen Charter record once the service request is selected.';
-    }
-    return 'I can help with ICO service requests, published requirements, processing time, and where to submit supporting details. Try one of the quick replies below.';
-  };
+  let previewSession = null;
+  let activeController = null;
+  let generation = 0;
+  let busy = false;
 
   const appendMessage = (text, sender) => {
     const row = document.createElement('div');
@@ -743,37 +824,121 @@ function renderChatbotDemoScript() {
     messages.scrollTop = messages.scrollHeight;
   };
 
-  const send = (text) => {
-    const clean = String(text || '').trim();
-    if (!clean) return;
-    appendMessage(clean, 'user');
-    window.setTimeout(() => appendMessage(responseFor(clean), 'bot'), 140);
-    input.value = '';
+  const setBusy = (value) => {
+    busy = value;
+    input.disabled = value;
+    submit.disabled = value;
+    replies.querySelectorAll('button').forEach((button) => {
+      button.disabled = value;
+    });
   };
 
-  const renderReplies = () => {
+  const renderReplies = (botReplies) => {
     replies.textContent = '';
+    const quickReplies = [];
+    (Array.isArray(botReplies) ? botReplies : []).forEach((reply) => {
+      if (Array.isArray(reply.quickReplies)) quickReplies.push(...reply.quickReplies);
+    });
+
     quickReplies.forEach((reply) => {
+      if (!reply || typeof reply.title !== 'string' || typeof reply.payload !== 'string') return;
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = reply;
-      button.addEventListener('click', () => send(reply));
+      button.textContent = reply.title;
+      button.addEventListener('click', () => requestTurn(reply.payload, { label: reply.title }));
       replies.appendChild(button);
     });
   };
 
-  const seed = () => {
-    messages.textContent = '';
-    appendMessage('Hello. I am AiCO, the ICO Services Assistant for Southern Luzon State University. What service do you need help with today?', 'bot');
-    renderReplies();
+  const updatePublishedStatus = (published) => {
+    const serviceCount = Number(published?.services || 0);
+    const faqCount = Number(published?.faqs || 0);
+    status.textContent =
+      serviceCount +
+      ' published ' +
+      (serviceCount === 1 ? 'service' : 'services') +
+      ' · ' +
+      faqCount +
+      ' ' +
+      (faqCount === 1 ? 'FAQ' : 'FAQs');
+  };
+
+  const requestTurn = async (message, options = {}) => {
+    const clean = String(message || '').trim();
+    if (!clean || (busy && !options.force)) return;
+
+    if (options.reset) {
+      generation += 1;
+      activeController?.abort();
+      previewSession = null;
+      messages.textContent = '';
+      replies.textContent = '';
+      status.textContent = 'Loading published content…';
+    }
+
+    const turn = ++generation;
+    const controller = new AbortController();
+    activeController = controller;
+    setBusy(true);
+
+    if (options.showUser !== false) appendMessage(options.label || clean, 'user');
+    input.value = '';
+
+    try {
+      const body = new URLSearchParams({
+        _csrf: csrf.value,
+        message: clean,
+        session: JSON.stringify(previewSession || {}),
+      });
+      const response = await fetch(form.action, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: controller.signal,
+      });
+
+      if (response.redirected) {
+        throw new Error('Your admin session expired. Refresh this page and sign in again.');
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const payload = contentType.includes('application/json') ? await response.json() : {};
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Your admin session expired. Refresh this page and sign in again.');
+        }
+        throw new Error(payload.error || 'Live preview is temporarily unavailable. Please retry.');
+      }
+      if (turn !== generation) return;
+
+      previewSession = payload.session || null;
+      const botReplies = Array.isArray(payload.replies) ? payload.replies : [];
+      botReplies.forEach((reply) => {
+        if (reply && typeof reply.text === 'string') appendMessage(reply.text, 'bot');
+      });
+      renderReplies(botReplies);
+      updatePublishedStatus(payload.published);
+    } catch (error) {
+      if (error.name === 'AbortError' || turn !== generation) return;
+      appendMessage(error.message || 'Live preview is temporarily unavailable. Please retry.', 'bot');
+      status.textContent = 'Preview unavailable';
+    } finally {
+      if (turn === generation) {
+        activeController = null;
+        setBusy(false);
+        input.focus();
+      }
+    }
   };
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    send(input.value);
+    requestTurn(input.value);
   });
-  reset.addEventListener('click', seed);
-  seed();
+  reset.addEventListener('click', () =>
+    requestTurn('BACK_TO_START', { force: true, reset: true, showUser: false }),
+  );
+  requestTurn('BACK_TO_START', { force: true, reset: true, showUser: false });
 })();
 `;
 }
@@ -785,11 +950,13 @@ module.exports = {
   renderChatbotDemo,
   renderChatbotDemoScript,
   renderContentHistory,
+  renderContentFormScript,
   renderContentReviewDetail,
   renderContentReviewRows,
   renderFilterBar,
   renderLogin,
   renderNewContentForm,
+  renderNewProcessForm,
   renderOfficeDashboard,
   renderPagination,
   renderUserManagement,

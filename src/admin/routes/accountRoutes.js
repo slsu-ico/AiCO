@@ -11,7 +11,12 @@ async function handleAccountRoutes(context) {
   const { request, response, url, pathname, services, csrfProtection } = context;
 
   if (pathname === '/admin/account-requests') {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'GET') {
@@ -25,7 +30,12 @@ async function handleAccountRoutes(context) {
 
   const action = parseRequestAction(pathname);
   if (action) {
-    const user = await requireReviewAdmin({ request, response, redis: services.redis });
+    const user = await requireReviewAdmin({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
     if (!user) return true;
 
     if (request.method !== 'POST') {
