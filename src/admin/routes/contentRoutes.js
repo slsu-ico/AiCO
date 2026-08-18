@@ -1,5 +1,9 @@
 const { methodNotAllowed, sendHtml } = require('../../httpUtils');
-const { renderContentFormScript, renderNewContentForm } = require('../../adminViews');
+const {
+  renderContentFormScript,
+  renderNewContentForm,
+  renderNewProcessForm,
+} = require('../../adminViews');
 const {
   handleAttachmentMetadataCreate,
   handleContentApprove,
@@ -41,6 +45,55 @@ async function handleContentRoutes(context) {
       pool: services.pool,
       user,
       url,
+    });
+    return true;
+  }
+
+  if (pathname === '/admin/processes/new') {
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
+    if (!user) return true;
+
+    if (request.method !== 'GET') {
+      methodNotAllowed(response, ['GET']);
+      return true;
+    }
+
+    const notice =
+      url.searchParams.get('submitted') === '1'
+        ? 'Your process has been submitted for review.'
+        : '';
+    sendHtml(response, 200, renderNewProcessForm({ user, notice }));
+    return true;
+  }
+
+  if (pathname === '/admin/processes') {
+    const user = await requireOfficeUser({
+      request,
+      response,
+      redis: services.redis,
+      sessionSecrets: services.sessionSecrets,
+    });
+    if (!user) return true;
+
+    if (request.method !== 'POST') {
+      methodNotAllowed(response, ['POST']);
+      return true;
+    }
+
+    await handleContentSubmit({
+      request,
+      response,
+      pool: services.pool,
+      user,
+      uploadDir: services.uploadDir,
+      csrfProtection,
+      contentTypeOverride: 'citizens_charter_service',
+      successLocation: '/admin/processes/new?submitted=1',
     });
     return true;
   }

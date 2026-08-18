@@ -225,7 +225,9 @@ test('role gates allow office dashboards while blocking admin-only review routes
 
     assert.equal(dashboard.status, 200);
     assert.match(dashboardHtml, /Office dashboard/);
-    assert.match(dashboardHtml, /Submit new content/);
+    assert.match(dashboardHtml, /Enroll a process/);
+    assert.match(dashboardHtml, /href="\/admin\/processes\/new"/);
+    assert.match(dashboardHtml, /Submit other content/);
     assert.equal(reviews.status, 403);
     assert.match(reviewsHtml, /do not have access/);
     assert.doesNotMatch(reviewsHtml, /Content reviews/);

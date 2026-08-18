@@ -281,7 +281,10 @@ function renderOfficeDashboard(user, submissions, options = {}) {
         ${renderOfficeSubmissionRows(submissions)}
         ${renderPagination({ state, total })}
       </section>
-      <p><a class="button" href="/admin/content/new">Submit new content</a></p>
+      <p class="form-actions">
+        <a class="button" href="/admin/processes/new">Enroll a process</a>
+        <a class="button button-secondary" href="/admin/content/new">Submit other content</a>
+      </p>
     `,
   });
 }
@@ -382,6 +385,58 @@ function contentTypeOptions(selected = '') {
     .join('');
 }
 
+function renderCitizenCharterFields() {
+  return `
+    ${field('Service ID', 'service_id', { required: true, maxlength: FIELD_LIMITS.service_id })}
+    <label>Audience
+      <select id="audience" name="audience" required>
+        <option value="internal">Internal SLSU unit/office</option>
+        <option value="external">External partner</option>
+      </select>
+    </label>
+    ${field('Process or service name', 'service_name', { required: true, maxlength: FIELD_LIMITS.service_name })}
+    ${field('Description', 'description', { multiline: true, required: true, maxlength: FIELD_LIMITS.description })}
+    ${field('Responsible office or unit', 'office_or_unit', { required: true, maxlength: FIELD_LIMITS.office_or_unit })}
+    ${field('Classification', 'classification', { required: true, maxlength: FIELD_LIMITS.classification })}
+    ${field('Transaction type (optional)', 'transaction_type', { maxlength: FIELD_LIMITS.transaction_type })}
+    ${field('Who may avail', 'who_may_avail', { required: true, maxlength: FIELD_LIMITS.who_may_avail })}
+    ${field('Requirements — one per line', 'requirements', { multiline: true, required: true, maxlength: FIELD_LIMITS.requirements })}
+    ${field('Procedure or submission timeline — one step per line', 'submission_timeline', { multiline: true, required: true, maxlength: FIELD_LIMITS.submission_timeline })}
+    ${field('Official information or request link', 'official_link', { type: 'url', required: true, maxlength: FIELD_LIMITS.official_link })}
+    ${field('Fees', 'fees', { required: true, maxlength: FIELD_LIMITS.fees })}
+    ${field('Processing time', 'processing_time', { required: true, maxlength: FIELD_LIMITS.processing_time })}
+    ${field('Client Satisfaction Survey reminder', 'css_reminder', { multiline: true, required: true, maxlength: FIELD_LIMITS.css_reminder })}
+  `;
+}
+
+function renderNewProcessForm({ user, notice = '' }) {
+  return pageLayout({
+    title: 'Enroll a new process',
+    activePath: '/admin/processes/new',
+    user,
+    notice,
+    body: `
+      <section class="panel-section" aria-labelledby="process-form-guidance">
+        <h2 id="process-form-guidance">Before you submit</h2>
+        <p>Enter the approved Citizen's Charter information for one process. The submission remains pending until an administrator reviews and publishes it.</p>
+        <p class="form-help">Use a permanent, globally unique service ID with lowercase letters, numbers, and single hyphens, such as <code>external-media-coverage-request</code>.</p>
+      </section>
+      <form method="post" action="/admin/processes">
+        ${csrfInput(user)}
+        <fieldset>
+          <legend>Citizen's Charter process</legend>
+          ${renderCitizenCharterFields()}
+        </fieldset>
+        <p class="form-help">Use the official link above as the durable source of truth for the published process.</p>
+        <div class="form-actions">
+          <button type="submit">Submit process for review</button>
+          <a class="button button-secondary" href="/admin/submissions">View submissions</a>
+        </div>
+      </form>
+    `,
+  });
+}
+
 function renderNewContentForm({ user, notice = '' }) {
   return pageLayout({
     title: 'New content',
@@ -400,25 +455,7 @@ function renderNewContentForm({ user, notice = '' }) {
         <fieldset data-content-fields="citizens_charter_service">
           <legend>Citizen's Charter chatbot record</legend>
           <p>Enter one requirement or submission reminder per line. The service ID is a stable identifier such as <code>internal-layout-request</code>.</p>
-          ${field('Service ID', 'service_id', { required: true, maxlength: FIELD_LIMITS.service_id })}
-          <label>Audience
-            <select id="audience" name="audience" required>
-              <option value="internal">Internal SLSU unit/office</option>
-              <option value="external">External partner</option>
-            </select>
-          </label>
-          ${field('Service name', 'service_name', { required: true, maxlength: FIELD_LIMITS.service_name })}
-          ${field('Description', 'description', { multiline: true, required: true, maxlength: FIELD_LIMITS.description })}
-          ${field('Office or unit', 'office_or_unit', { required: true, maxlength: FIELD_LIMITS.office_or_unit })}
-          ${field('Classification', 'classification', { required: true, maxlength: FIELD_LIMITS.classification })}
-          ${field('Transaction type', 'transaction_type', { maxlength: FIELD_LIMITS.transaction_type })}
-          ${field('Who may avail', 'who_may_avail', { required: true, maxlength: FIELD_LIMITS.who_may_avail })}
-          ${field('Requirements', 'requirements', { multiline: true, required: true, maxlength: FIELD_LIMITS.requirements })}
-          ${field('Submission timeline', 'submission_timeline', { multiline: true, required: true, maxlength: FIELD_LIMITS.submission_timeline })}
-          ${field('Official link', 'official_link', { type: 'url', required: true, maxlength: FIELD_LIMITS.official_link })}
-          ${field('Fees', 'fees', { required: true, maxlength: FIELD_LIMITS.fees })}
-          ${field('Processing time', 'processing_time', { required: true, maxlength: FIELD_LIMITS.processing_time })}
-          ${field('Client Satisfaction Survey reminder', 'css_reminder', { multiline: true, required: true, maxlength: FIELD_LIMITS.css_reminder })}
+          ${renderCitizenCharterFields()}
         </fieldset>
         <fieldset data-content-fields="faq" hidden disabled>
           <legend>FAQ chatbot record</legend>
@@ -845,6 +882,7 @@ module.exports = {
   renderFilterBar,
   renderLogin,
   renderNewContentForm,
+  renderNewProcessForm,
   renderOfficeDashboard,
   renderPagination,
   renderUserManagement,

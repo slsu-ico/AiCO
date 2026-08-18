@@ -1173,6 +1173,48 @@ test('renders new content form only for authenticated office users', async () =>
   }
 });
 
+test('renders the dedicated process enrollment form only for authenticated office users', async () => {
+  const redis = new FakeRedis();
+  const officeUserCookie = await officeCookie(redis);
+  const administratorCookie = await adminCookie(redis);
+  const pool = createFakePool(() => {
+    throw new Error('process enrollment form should not query the database');
+  });
+  const server = createAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const unauthenticated = await fetch(`${baseUrl}/admin/processes/new`, {
+      redirect: 'manual',
+    });
+    assert.equal(unauthenticated.status, 303);
+    assert.equal(unauthenticated.headers.get('location'), '/login');
+
+    const response = await fetch(`${baseUrl}/admin/processes/new?submitted=1`, {
+      headers: { cookie: officeUserCookie },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Enroll a new process/);
+    assert.match(html, /Your process has been submitted for review/);
+    assert.match(html, /action="\/admin\/processes"/);
+    assert.match(html, /name="service_id"/);
+    assert.match(html, /name="submission_timeline"/);
+    assert.doesNotMatch(html, /name="content_type"/);
+    assert.doesNotMatch(html, /name="question"/);
+
+    const forbidden = await fetch(`${baseUrl}/admin/processes/new`, {
+      headers: { cookie: administratorCookie },
+    });
+    const forbiddenHtml = await forbidden.text();
+    assert.equal(forbidden.status, 403);
+    assert.match(forbiddenHtml, /do not have access/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('admin cannot access office-only new content form', async () => {
   const redis = new FakeRedis();
   const cookie = await adminCookie(redis);
@@ -1254,6 +1296,96 @@ test('office user submits content for their assigned office as pending review', 
     );
     assert.equal(chatbotResult.session.state, 'viewing_faq');
     assert.match(chatbotResult.replies[0].text, /Submit the request form/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('dedicated process form creates a pending service using server-owned type and office', async () => {
+  const redis = new FakeRedis();
+  const cookie = await officeCookie(redis, { id: 44, office_id: 7 });
+  let itemParams;
+  let versionParams;
+  const pool = createFakePool(async (text, params) => {
+    if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+    if (sqlIncludes(text, 'INSERT INTO content_items')) {
+      itemParams = params;
+      return { rows: [{ id: 900 }] };
+    }
+    if (sqlIncludes(text, 'INSERT INTO content_versions')) {
+      versionParams = params;
+      return { rows: [{ id: 901 }] };
+    }
+    throw new Error(`Unexpected SQL: ${text}`);
+  });
+  const server = createHardenedAdminServer({ pool, redis });
+  const baseUrl = await listen(server);
+
+  try {
+    const formPage = await fetch(`${baseUrl}/admin/processes/new`, {
+      headers: { cookie },
+    });
+    const csrfToken = extractCsrfToken(await formPage.text());
+    assert.equal(formPage.status, 200);
+    assert.ok(csrfToken);
+
+    const forged = await fetch(`${baseUrl}/admin/processes`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({ _csrf: 'forged-token' }),
+    });
+    assert.equal(forged.status, 403);
+    assert.equal(itemParams, undefined);
+
+    const response = await fetch(`${baseUrl}/admin/processes`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie,
+      },
+      body: form({
+        _csrf: csrfToken,
+        content_type: 'faq',
+        service_id: 'external-media-coverage-request',
+        audience: 'external',
+        service_name: 'Media Coverage Request',
+        description: 'Request official media coverage for an approved university activity.',
+        office_or_unit: 'Information and Communications Office',
+        classification: 'Simple',
+        who_may_avail: 'External partners with an approved university activity',
+        requirements: 'Approved request letter\nConfirmed event details',
+        submission_timeline: 'Submit the request\nWait for schedule confirmation',
+        official_link: 'https://www.slsu.edu.ph/media-coverage',
+        fees: 'None',
+        processing_time: 'Three working days',
+        css_reminder: 'Complete the Client Satisfaction Survey after service.',
+      }),
+      redirect: 'manual',
+    });
+
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/admin/processes/new?submitted=1');
+    assert.deepEqual(itemParams, [7, 'citizens_charter_service', 44]);
+    assert.equal(versionParams[2], 'pending_review');
+    assert.equal(versionParams[3], 'Media Coverage Request');
+    assert.deepEqual(versionParams[5], {
+      id: 'external-media-coverage-request',
+      audience: 'external',
+      service_name: 'Media Coverage Request',
+      description: 'Request official media coverage for an approved university activity.',
+      office_or_unit: 'Information and Communications Office',
+      classification: 'Simple',
+      who_may_avail: 'External partners with an approved university activity',
+      requirements: ['Approved request letter', 'Confirmed event details'],
+      submission_timeline: ['Submit the request', 'Wait for schedule confirmation'],
+      official_link: 'https://www.slsu.edu.ph/media-coverage',
+      fees: 'None',
+      processing_time: 'Three working days',
+      css_reminder: 'Complete the Client Satisfaction Survey after service.',
+    });
   } finally {
     await close(server);
   }

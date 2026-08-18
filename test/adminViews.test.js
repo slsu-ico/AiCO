@@ -7,6 +7,7 @@ const {
   renderChatbotDemoScript,
   renderLogin,
   renderNewContentForm,
+  renderNewProcessForm,
 } = require('../src/adminViews');
 
 test('admin view module escapes notice text rendered by public forms', () => {
@@ -26,6 +27,28 @@ test('admin view module renders office content form with escaped user metadata',
 
   assert.match(html, /value="7&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;"/);
   assert.match(html, /value="token&quot;&gt;&lt;script&gt;alert\(2\)&lt;\/script&gt;"/);
+  assert.doesNotMatch(html, /<script>alert/);
+});
+
+test('process enrollment view is a dedicated service-only form', () => {
+  const html = renderNewProcessForm({
+    user: {
+      office_id: '7"><script>alert(1)</script>',
+      csrfToken: 'token"><script>alert(2)</script>',
+    },
+  });
+
+  assert.match(html, /Enroll a new process/);
+  assert.match(html, /action="\/admin\/processes"/);
+  assert.match(html, /name="service_id"/);
+  assert.match(html, /name="audience"/);
+  assert.match(html, /name="service_name"/);
+  assert.match(html, /name="official_link"/);
+  assert.match(html, /name="_csrf"/);
+  assert.doesNotMatch(html, /name="office_id"/);
+  assert.doesNotMatch(html, /name="content_type"/);
+  assert.doesNotMatch(html, /name="question"/);
+  assert.doesNotMatch(html, /name="attachment"/);
   assert.doesNotMatch(html, /<script>alert/);
 });
 

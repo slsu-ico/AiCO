@@ -38,7 +38,8 @@ const navByRole = {
     {
       label: 'Office user',
       items: [
-        { href: '/admin/content/new', label: 'New content' },
+        { href: '/admin/processes/new', label: 'Enroll process' },
+        { href: '/admin/content/new', label: 'Other content' },
         { href: '/admin/submissions', label: 'Submissions' },
       ],
     },
@@ -453,6 +454,35 @@ function pageLayout({
     textarea {
       min-height: 92px;
       resize: vertical;
+    }
+
+    fieldset {
+      display: grid;
+      gap: 12px;
+      margin: 0 0 14px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+
+    legend {
+      padding: 0 5px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .form-help {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .form-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
     }
 
     input:focus,

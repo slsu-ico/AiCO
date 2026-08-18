@@ -601,7 +601,16 @@ function buildContentPayload({ form, user, contentType, title, body }) {
   };
 }
 
-async function handleContentSubmit({ request, response, pool, user, uploadDir, csrfProtection }) {
+async function handleContentSubmit({
+  request,
+  response,
+  pool,
+  user,
+  uploadDir,
+  csrfProtection,
+  contentTypeOverride = '',
+  successLocation = '/admin/content/new?submitted=1',
+}) {
   let submitted;
   try {
     submitted = await readContentForm(request);
@@ -642,7 +651,7 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
   const attachment = submitted.attachment;
   const officeId = Number(user.office_id);
   const requestedOfficeId = clean(form.office_id);
-  const contentType = clean(form.content_type);
+  const contentType = contentTypeOverride || clean(form.content_type);
 
   if (!Number.isInteger(officeId) || officeId < 1) {
     renderForbidden(response, user, 'Content can only be submitted for an assigned office.');
@@ -758,7 +767,7 @@ async function handleContentSubmit({ request, response, pool, user, uploadDir, c
     }
   });
 
-  redirect(response, '/admin/content/new?submitted=1');
+  redirect(response, successLocation);
 }
 
 async function handleAttachmentMetadataCreate({ request, response, pool, user }) {

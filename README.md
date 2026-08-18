@@ -7,6 +7,7 @@ Facebook Messenger chatbot and AiCO admin portal for Southern Luzon State Univer
 - Answers Messenger questions from approved ICO service records.
 - Guides internal offices and external partners to the right Citizen's Charter service.
 - Provides an admin portal for account requests, office content submissions, admin review, and publication.
+- Gives office users a dedicated `/admin/processes/new` form for enrolling Citizen's Charter processes.
 - Keeps pending edits out of live chatbot answers until an administrator publishes them.
 
 ## Requirements
