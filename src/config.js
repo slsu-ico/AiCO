@@ -1,10 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const {
-  loadManagedSecrets,
-  shouldUseManagedSecrets,
-} = require('./secretsManager');
+const { loadManagedSecrets, shouldUseManagedSecrets } = require('./secretsManager');
 
 function loadDotEnv(env) {
   const dotenvPath = path.join(__dirname, '..', '.env');

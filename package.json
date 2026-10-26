@@ -16,7 +16,7 @@
     "docker:logs": "docker compose logs -f",
     "docker:migrate": "docker compose run --rm app pnpm run migrate",
     "docker:seed": "docker compose run --rm app pnpm run seed",
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "secrets:rotate": "node scripts/rotate-managed-secrets.js rotate",
     "secrets:finalize": "node scripts/rotate-managed-secrets.js finalize",
     "lint": "eslint src test scripts api",

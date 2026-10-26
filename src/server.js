@@ -181,7 +181,9 @@ function extractIncomingText(event) {
  * @returns {(request: IncomingMessage, response: ServerResponse) => Promise<void>}
  */
 function createRequestHandler(options = {}) {
-  const verifyTokens = (options.verifyTokens || [options.verifyToken || 'dev-verify-token']).filter(Boolean);
+  const verifyTokens = (options.verifyTokens || [options.verifyToken || 'dev-verify-token']).filter(
+    Boolean,
+  );
   const hasInjectedServices = Object.prototype.hasOwnProperty.call(options, 'services');
   const hasInjectedFaqs = Object.prototype.hasOwnProperty.call(options, 'faqs');
   const logger = options.logger || createConsoleLogger();

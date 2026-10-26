@@ -24,6 +24,7 @@
 ### Task 1: Add Failing View Tests
 
 **Files:**
+
 - Modify: `test/adminViews.test.js`
 - Modify: `test/layout.test.js`
 
@@ -61,6 +62,7 @@ Expected: FAIL because `renderChatbotDemo`, `metric-grid`, grouped labels, and t
 ### Task 2: Implement Shared Shell And Dashboard Markup
 
 **Files:**
+
 - Modify: `src/layout.js`
 - Modify: `src/adminViews.js`
 
@@ -94,6 +96,7 @@ Expected: dashboard/layout assertions pass; chatbot demo assertions still fail u
 ### Task 3: Add Chatbot Demo View And Route
 
 **Files:**
+
 - Modify: `src/adminViews.js`
 - Modify: `src/adminRoutes.js`
 - Modify: `test/adminRoutes.test.js`
@@ -113,7 +116,9 @@ Add a server-rendered view with:
   <div class="quick-replies" id="chat-demo-quick-replies"></div>
   <form class="chat-demo-input" id="chat-demo-form">...</form>
 </section>
-<script>...</script>
+<script>
+  ...
+</script>
 ```
 
 Use static canned replies, no user-provided server data in JavaScript, and no network calls.
@@ -133,6 +138,7 @@ Expected: PASS.
 ### Task 4: Polish Existing Admin Surfaces
 
 **Files:**
+
 - Modify: `src/layout.js`
 - Modify: `src/adminViews.js`
 

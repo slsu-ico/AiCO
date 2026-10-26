@@ -7,7 +7,12 @@ const {
   VALID_CONTENT_TYPES,
   VALID_ROLES,
 } = require('../../adminConstants');
-const { likePattern, listStateFromUrl, noticeText, totalFromRows } = require('../../adminListState');
+const {
+  likePattern,
+  listStateFromUrl,
+  noticeText,
+  totalFromRows,
+} = require('../../adminListState');
 const { readMultipartForm } = require('../../adminMultipart');
 const {
   renderAccountRequest,
@@ -22,12 +27,7 @@ const {
   renderPagination,
   renderUserManagement,
 } = require('../../adminViews');
-const {
-  createSession,
-  getSession,
-  hashPassword,
-  verifyPassword,
-} = require('../../auth');
+const { createSession, getSession, hashPassword, verifyPassword } = require('../../auth');
 const { withTransaction } = require('../../db/postgres');
 const {
   escapeHtml,
@@ -1431,4 +1431,3 @@ module.exports = {
   requireServices,
   validateCsrf,
 };
-

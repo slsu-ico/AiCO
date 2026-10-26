@@ -183,9 +183,7 @@ function serviceListAllReply(services = loadServices(), locale = 'en') {
   return {
     text:
       locale === 'fil'
-        ? ['Narito ang mga serbisyo ng ICO:', '', ...lines, '', 'Pumili po ng serbisyo.'].join(
-            '\n',
-          )
+        ? ['Narito ang mga serbisyo ng ICO:', '', ...lines, '', 'Pumili po ng serbisyo.'].join('\n')
         : ['Here are the ICO services:', '', ...lines, '', 'Please choose a service.'].join('\n'),
     quickReplies: services.map((service) =>
       quickReply(serviceQuickReplyTitle(service), servicePayload(service)),
