@@ -596,9 +596,7 @@ function officeOptions(offices, selectedOfficeId) {
 }
 
 function roleOptions(selectedRole) {
-  return [...VALID_ROLES]
-    .map((role) => option(role, formatStatus(role), selectedRole))
-    .join('');
+  return [...VALID_ROLES].map((role) => option(role, formatStatus(role), selectedRole)).join('');
 }
 
 function renderUserManagement(users, offices, user, options = {}) {

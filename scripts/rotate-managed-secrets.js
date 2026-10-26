@@ -20,8 +20,7 @@ function buildRotationPayload(current, options = {}) {
 
   return {
     ...current,
-    MESSENGER_VERIFY_TOKEN_CURRENT:
-      options.nextMessengerVerifyToken || generateManagedSecret(),
+    MESSENGER_VERIFY_TOKEN_CURRENT: options.nextMessengerVerifyToken || generateManagedSecret(),
     MESSENGER_VERIFY_TOKEN_PREVIOUS:
       current.MESSENGER_VERIFY_TOKEN_CURRENT || current.MESSENGER_VERIFY_TOKEN || '',
     SESSION_SECRET_CURRENT: options.nextSessionSecret || generateManagedSecret(48),
@@ -80,7 +79,9 @@ async function getVaultToken() {
     }
 
     const result = await response.json();
-    if (!result.auth?.client_token) throw new Error('Vault JWT login did not return a client token.');
+    if (!result.auth?.client_token) {
+      throw new Error('Vault JWT login did not return a client token.');
+    }
     return result.auth.client_token;
   }
 
@@ -148,7 +149,8 @@ async function verifyHealth(data) {
     return;
   }
 
-  const deadline = Date.now() + Number(process.env.ROTATION_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS);
+  const deadline =
+    Date.now() + Number(process.env.ROTATION_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS);
   let lastError = '';
 
   while (Date.now() < deadline) {
@@ -201,7 +203,9 @@ async function main(argv = process.argv.slice(2)) {
     await triggerRedeploy(next);
     await verifyHealth(next);
     await verifyWebhookToken(next);
-    console.log(`Rotation promoted new keys. Revoke old keys after ${next.SECRET_ROTATION_REVOKE_AFTER}.`);
+    console.log(
+      `Rotation promoted new keys. Revoke old keys after ${next.SECRET_ROTATION_REVOKE_AFTER}.`,
+    );
     return;
   }
 
