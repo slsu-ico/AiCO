@@ -1,0 +1,239 @@
+[
+  {
+    "id": "external-layout-iec-materials",
+    "audience": "external",
+    "service_name": "Request for layout of IEC materials",
+    "description": "University partners may request layout designs for IEC materials such as social media posts, tarpaulins, presentations, brochures, flyers, and related publications.",
+    "office_or_unit": "ICO - Publications and Digital Communications (PuDCom) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Proof of approved partnership with SLSU, such as signed MOA or approved request letter.",
+      "Completely filled out online Job Order form with layout specifications and related photo/video materials."
+    ],
+    "submission_timeline": [
+      "Submit at least ten (10) working days before intended use.",
+      "If no concept is provided, additional time beyond the 10-day requirement may be necessary.",
+      "Requests for events scheduled within the same week are strongly discouraged and may be declined unless accompanied by an approved letter signed by the University President."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "9 working days and 5 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "external-documentation-services",
+    "audience": "external",
+    "service_name": "Request for documentation services",
+    "description": "Partner agencies and sectors may request ICO documentation services for events through raw photo and video footage. This does not include AVP highlights.",
+    "office_or_unit": "ICO - Content Development and Creative Services (CoDeCS) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "Partner National Government Agencies and Private Sectors",
+    "requirements": [
+      "Proof of approved partnership with SLSU, such as signed MOA or approved request letter.",
+      "Completely filled out online Job Order form."
+    ],
+    "submission_timeline": [
+      "Requests for AVPs must be submitted at least ten (10) working days before the event or presentation date.",
+      "Requests involving shooting across multiple locations must be submitted at least twenty (20) working days before the event or presentation date.",
+      "Last-minute requests within the same week are discouraged and may be declined unless accompanied by an approved letter signed by the University President."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "4 working days and 30 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-training-speakership",
+    "audience": "internal",
+    "service_name": "Provision of training and/or speakership",
+    "description": "SLSU units may request in-house training implementation or ICO speakership for seminars and training.",
+    "office_or_unit": "ICO - Public and Media Relations (PuMRel) Unit",
+    "classification": "Complex Transaction",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Written request addressed to the University President through the ICO Head.",
+      "Training proposal and/or program draft."
+    ],
+    "submission_timeline": [
+      "Requests are assessed by ICO.",
+      "Off-campus requests are forwarded to the University President for approval."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "4 working days and 10 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-layout-iec-materials",
+    "audience": "internal",
+    "service_name": "Request for layout of IEC materials",
+    "description": "University units may request layout designs for IEC materials such as social media posts, tarpaulins, presentations, brochures, flyers, and related publications.",
+    "office_or_unit": "ICO - Publications and Digital Communications (PuDCom) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Completely filled out online Job Order form with layout specifications and related photo/video materials.",
+      "Complete reference details."
+    ],
+    "submission_timeline": [
+      "Submit at least ten (10) working days before intended use.",
+      "If no concept is provided, additional time beyond the 10-day requirement may be necessary.",
+      "Incomplete submissions will result in automatic deferment.",
+      "Same-week requests are strongly discouraged and may be declined unless accompanied by an approved letter signed by the University President."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "9 working days and 5 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-writing-request",
+    "audience": "internal",
+    "service_name": "Request for article and/or report writing",
+    "description": "University units may request ICO to prepare articles, reports, and related write-ups.",
+    "office_or_unit": "ICO - Publications and Digital Communications (PuDCom) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Completely filled out online Job Order form.",
+      ".docx file containing essential request details.",
+      "Google Drive link to additional information, if necessary.",
+      "Complete reference details."
+    ],
+    "submission_timeline": [
+      "Articles must be submitted at least five (5) working days before the deadline.",
+      "Reports and technical papers require at least ten (10) working days.",
+      "Extensive technical writing exceeding five pages may need additional time beyond the 10-day requirement.",
+      "Incomplete submissions will be automatically deferred."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "6 working days and 5 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-posting-email-blast",
+    "audience": "internal",
+    "service_name": "Request for posting and/or email blast",
+    "description": "University units may request ICO to publish information through Facebook, website posting, or email blast.",
+    "office_or_unit": "ICO - Public and Media Relations (PuMRel) Unit",
+    "classification": "Simple",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Completely filled out online Job Order form.",
+      "For Facebook and website posting: Word file containing the caption and editable Canva link of the pubmat.",
+      "Names of the writer and layout artist, if applicable.",
+      "For email blast: Word file containing the body of the email and necessary attachments."
+    ],
+    "submission_timeline": [
+      "For official templates for social media and website posts, contact ICO at reports@slsu.edu.ph."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "30 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-audiovisual-production",
+    "audience": "internal",
+    "service_name": "Request for audiovisual production",
+    "description": "University units may request ICO to produce audiovisual materials for documentation, reports, and promotional purposes.",
+    "office_or_unit": "ICO - Content Development and Creative Services (CoDeCS) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Completely filled out online Job Order form.",
+      "Google Drive link to comprehensive details.",
+      "Script, storyboard, or mood board if possible.",
+      "Available photos/video materials."
+    ],
+    "submission_timeline": [
+      "Requests for AVPs must be submitted at least ten (10) working days before the event or presentation date.",
+      "Requests involving shooting across multiple locations must be submitted at least twenty (20) working days before the event or presentation date.",
+      "If no script or storyboard is provided, additional time beyond the 20-day requirement may be needed.",
+      "Last-minute same-week requests are discouraged and may be declined unless accompanied by an approved letter signed by the University President."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "17 working days and 5 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-documentation-services",
+    "audience": "internal",
+    "service_name": "Request for documentation services",
+    "description": "University units may request ICO to document events by capturing raw photo and video footage. This request does not include AVP highlights.",
+    "office_or_unit": "ICO - Content Development and Creative Services (CoDeCS) Unit",
+    "classification": "Highly Technical",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": ["Completely filled out online Job Order form."],
+    "submission_timeline": [
+      "Requests for AVPs must be submitted at least ten (10) working days before the event or presentation date.",
+      "Requests involving shooting across multiple locations must be submitted at least twenty (20) working days before the event or presentation date.",
+      "Last-minute same-week requests are discouraged and may be declined unless accompanied by an approved letter signed by the University President."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "3 working days and 20 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-review-layout-writeup",
+    "audience": "internal",
+    "service_name": "Request review of layout and/or write-up",
+    "description": "University units may request ICO to review the write-up and/or design layout of IEC materials such as programs, certificates, and tarpaulins.",
+    "office_or_unit": "ICO - Public and Media Relations (PuMRel) Unit",
+    "classification": "Complex Transaction",
+    "transaction_type": "G2G - Government to Government",
+    "who_may_avail": "All University Units",
+    "requirements": [
+      "Completely filled out online Job Order form with the editable link to the material."
+    ],
+    "submission_timeline": [
+      "A minimum of five (5) working days is required for review.",
+      "Last-minute requests, particularly for events within the same week, are discouraged."
+    ],
+    "official_link": "https://forms.gle/CsJsfxNxSFt4Swo38",
+    "fees": "None",
+    "processing_time": "1 working day and 5 minutes",
+    "css_reminder": "Accomplish the Client Satisfaction Survey after the service."
+  },
+  {
+    "id": "internal-photo-video-assets",
+    "audience": "both",
+    "catalog_group": "internal",
+    "service_name": "Request for Photo/Video Assets",
+    "description": "Request access to ICO photo and video assets documenting university events. Specify the asset types, intended use, and identifying details. The request form offers Photos, Videos, and Drone Shots.",
+    "office_or_unit": "ICO - Information and Communications Office",
+    "classification": "Not specified in the supplied process document. Confirm with ICO.",
+    "who_may_avail": "All stakeholders, including internal and external units.",
+    "requirements": [
+      "Completely fill out the online Job Order form.",
+      "Select the type of asset needed: Photos, Videos, or Drone Shots. The form allows multiple selections.",
+      "State the purpose of the request and clearly specify where the assets will be used.",
+      "Describe the assets needed, identifying the person, event, or location so ICO can select the best possible asset."
+    ],
+    "submission_timeline": [
+      "After submitting the online Job Order form, notify ICO by email at reports@slsu.edu.ph or Messenger (@slsuico).",
+      "ICO provides 3-day access and notifies the requester of that access period.",
+      "Use beyond the stated purpose may be subject to copyright restrictions and applicable sanctions, as noted in the form.",
+      "Complete the Client Satisfaction Form after the service.",
+      "No advance submission deadline is specified in the supplied process document. Confirm scheduling with ICO."
+    ],
+    "official_link": "https://docs.google.com/forms/d/e/1FAIpQLSdl6Lp5X68NWAcGQvm_AMFGJ4-WFVd-BuHBX9iX4dP4ipYpJQ/viewform",
+    "fees": "None",
+    "fee_source": "User confirmed on October 26, 2026 that all ICO services currently have no fees.",
+    "processing_time": "Listed activity durations: acknowledgement and assessment, 5 minutes upon receipt; providing 3-day access, 15 minutes; Client Satisfaction Form, 5 minutes (25 minutes in total). The 3-day period is the access window, not the processing time.",
+    "css_reminder": "Complete the Client Satisfaction Form after the service.",
+    "source_note": "Process source: user-supplied 02 Request for Photo or Video Assets.docx.pdf, PMC-ICO-3.01, revision 0, effective July 1, 2025, process page 2 of 4. Activity times total 25 minutes by addition; 3 days is the access period. Scope includes internal and external units; S8 remains in the internal catalog group shown in the folder screenshot. Required form fields and copyright reminder come from the user-provided Section 11 screenshot (PMC-ICO-3.01F1, rev. 0). Respondent URL is the form link supplied by the user; no editor URL is exposed."
+  }
+]

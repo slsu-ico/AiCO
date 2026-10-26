@@ -1,0 +1,38 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--appendfsync',
+        'always',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - ico-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  chatbot:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      PORT: '3000'
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 50s
+volumes:
+  ico-redis:
