@@ -1,0 +1,507 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+body,div,span,p,button,input,select,textarea{font-family:var(--font-sans)}
+.root{width:100%;font-size:14px;color:var(--color-text-primary)}
+.tabs{display:flex;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.tab{padding:10px 18px;border:none;background:none;font:500 13px var(--font-sans);color:var(--color-text-secondary);cursor:pointer;border-bottom:2px solid transparent}
+.tab.on{color:var(--color-text-primary);border-bottom-color:#022519}
+.pnl{display:none}.pnl.on{display:flex}
+
+/* ── CHAT ── */
+.chat-wrap{flex-direction:column;height:560px}
+.chat-hdr{padding:11px 15px;display:flex;align-items:center;gap:10px;background:#022519;flex-shrink:0}
+.hdr-av{width:32px;height:32px;border-radius:50%;background:#c89b2c;display:grid;place-items:center;font-size:11px;font-weight:500;color:#022519;flex-shrink:0}
+.hdr-name{font-size:13px;color:#fff;font-weight:500}
+.hdr-sub{font-size:11px;color:rgba(255,255,255,.55)}
+.online{width:7px;height:7px;border-radius:50%;background:#4ade80;margin-left:auto;flex-shrink:0}
+.rst{padding:4px 10px;border:0.5px solid rgba(255,255,255,.3);background:none;border-radius:var(--border-radius-md);font:12px var(--font-sans);color:rgba(255,255,255,.65);cursor:pointer;margin-left:8px}
+.msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:var(--color-background-secondary)}
+.msg{display:flex;gap:6px;max-width:92%;animation:mi .2s ease}
+@keyframes mi{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.msg.bot{align-self:flex-start}.msg.usr{align-self:flex-end;flex-direction:row-reverse}
+.bub{padding:8px 11px;border-radius:11px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.msg.bot .bub{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);border-bottom-left-radius:3px}
+.msg.usr .bub{background:#022519;color:#fff;border-bottom-right-radius:3px}
+.bav{width:24px;height:24px;border-radius:50%;background:#f5eac8;display:grid;place-items:center;font-size:10px;font-weight:500;color:#022519;flex-shrink:0;margin-top:2px}
+.qr-area{padding:7px 12px 5px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);overflow-x:auto;flex-shrink:0;min-height:36px}
+.qr-inner{display:flex;gap:6px;width:max-content}
+.qr{padding:5px 11px;border:0.5px solid #022519;border-radius:99px;background:none;font:500 12px var(--font-sans);color:#022519;cursor:pointer;white-space:nowrap;transition:all .12s}
+.qr:hover{background:#022519;color:#fff}
+.inp-row{display:flex;gap:7px;padding:8px 11px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0}
+.cin{flex:1;padding:7px 12px;border:0.5px solid var(--color-border-secondary);border-radius:20px;font:13px var(--font-sans);color:var(--color-text-primary);background:var(--color-background-primary);outline:none}
+.cin:focus{border-color:#022519}
+.snd{width:32px;height:32px;border-radius:50%;background:#022519;border:none;cursor:pointer;color:#fff;font-size:13px;flex-shrink:0;display:grid;place-items:center}
+.typing{display:flex;gap:4px;padding:8px 11px;align-items:center}
+.typing span{width:6px;height:6px;border-radius:50%;background:var(--color-text-secondary);animation:tb .9s infinite}
+.typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+@keyframes tb{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}
+
+/* ── ADMIN ── */
+.adm-wrap{flex-direction:row;height:560px}
+.sb{width:200px;background:#022519;padding:13px;display:flex;flex-direction:column;gap:1px;flex-shrink:0;overflow-y:auto;
+  background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 1px,transparent 1px 11px)}
+.sb-brand{padding-bottom:11px;border-bottom:0.5px solid rgba(255,255,255,.12);margin-bottom:9px}
+.sb-brand small{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:rgba(255,255,255,.4);display:block}
+.sb-brand strong{font-size:16px;font-weight:500;color:#fff;display:block}
+.sb-user{display:flex;align-items:center;gap:7px;padding:7px 9px;border:0.5px solid rgba(255,255,255,.14);border-radius:var(--border-radius-md);background:rgba(0,0,0,.18);margin-bottom:9px}
+.sb-av{width:28px;height:28px;border-radius:50%;background:#c89b2c;display:grid;place-items:center;font-size:10px;font-weight:500;color:#022519;flex-shrink:0}
+.sb-user strong{font-size:11.5px;color:#fff;font-weight:500;display:block}
+.sb-user span{font-size:10px;color:rgba(255,255,255,.5)}
+.ngl{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.6px;color:rgba(255,255,255,.38);padding:7px 8px 2px;margin-top:3px}
+.ni{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:var(--border-radius-md);cursor:pointer;font-size:12px;color:rgba(255,255,255,.78);border-left:2px solid transparent;transition:all .1s}
+.ni:hover{background:rgba(255,255,255,.09);color:#fff}
+.ni.on{background:rgba(255,255,255,.13);color:#fff;border-left-color:#c89b2c;font-weight:500}
+.nb{min-width:17px;padding:1px 4px;border-radius:99px;background:#c89b2c;color:#022519;font-size:10px;font-weight:500;text-align:center}
+.adm-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{padding:11px 16px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0}
+.topbar h3{font-size:15px;font-weight:500;color:var(--color-text-primary);margin:0}
+.topbar small{font-size:11px;color:var(--color-text-secondary);display:block;margin-top:1px}
+.tb-btns{display:flex;gap:5px;flex-shrink:0}
+.btn{padding:5px 11px;border-radius:var(--border-radius-md);font:500 12px var(--font-sans);cursor:pointer;border:0.5px solid var(--color-border-secondary);background:none;color:var(--color-text-primary);transition:background .1s}
+.btn:hover{background:var(--color-background-secondary)}
+.btn-p{background:#022519;color:#fff;border-color:#022519}.btn-p:hover{background:#064f35}
+.btn-ok{color:var(--color-text-success);border-color:var(--color-border-success)}.btn-ok:hover{background:var(--color-background-success)}
+.btn-bad{color:var(--color-text-danger);border-color:var(--color-border-danger)}.btn-bad:hover{background:var(--color-background-danger)}
+.adm-main{flex:1;overflow-y:auto;padding:14px;min-width:0}
+.pg{display:none}.pg.on{display:block;animation:mi .15s}
+.notice{background:var(--color-background-warning);border:0.5px solid var(--color-border-warning);border-radius:var(--border-radius-md);padding:7px 11px;font-size:12px;color:var(--color-text-warning);margin-bottom:12px;display:none}
+.mgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:11px 13px;cursor:pointer;border:0.5px solid var(--color-border-tertiary);transition:border-color .1s}
+.mc:hover{border-color:#022519}
+.mc .lbl{font-size:11px;color:var(--color-text-secondary);margin-bottom:3px}
+.mc .val{font-size:22px;font-weight:500;color:var(--color-text-primary)}
+.mc .sub{font-size:11px;color:var(--color-text-secondary);margin-top:2px}
+.stl{font-size:12.5px;font-weight:500;color:var(--color-text-primary);margin-bottom:9px}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.tbl th{color:var(--color-text-secondary);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:500;padding:6px 9px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:left}
+.tbl td{padding:8px 9px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);vertical-align:middle;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--color-background-secondary)}
+.bdg{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:500;border:0.5px solid var(--color-border-tertiary);white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.bp{color:var(--color-text-info)}.bp .dot{background:var(--color-text-info)}
+.bg{color:var(--color-text-success)}.bg .dot{background:var(--color-text-success)}
+.bw{color:var(--color-text-warning)}.bw .dot{background:var(--color-text-warning)}
+.br{color:var(--color-text-danger)}.br .dot{background:var(--color-text-danger)}
+.pcell{display:flex;align-items:center;gap:6px}
+.pav{width:26px;height:26px;border-radius:50%;background:var(--color-background-info);display:grid;place-items:center;font-size:10px;font-weight:500;color:var(--color-text-info);flex-shrink:0}
+.pi strong{display:block;font-size:12px;font-weight:500}
+.pi small{color:var(--color-text-secondary);font-size:11px}
+.rw{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:12px}
+.rc{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:11px}
+.rc h4{font-size:10.5px;font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.rc pre{font-size:11px;background:var(--color-background-secondary);padding:7px;border-radius:var(--border-radius-md);overflow:auto;max-height:100px;white-space:pre-wrap;word-break:break-all;color:var(--color-text-primary)}
+.dgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.dc{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px;border-top-width:2.5px}
+.dc-a{border-top-color:var(--color-border-success)}.dc-r{border-top-color:var(--color-border-warning)}.dc-x{border-top-color:var(--color-border-danger)}
+.dc h4{font-size:12px;font-weight:500;margin-bottom:3px;color:var(--color-text-primary)}
+.dc p{font-size:11px;color:var(--color-text-secondary);margin-bottom:7px;line-height:1.4}
+.dc textarea{width:100%;padding:5px 7px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font:11px var(--font-sans);height:46px;resize:none;background:var(--color-background-primary);color:var(--color-text-primary);outline:none;margin-bottom:5px}
+.fs{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:11px;margin-bottom:10px}
+.fs h3{font-size:12.5px;font-weight:500;margin-bottom:9px;color:var(--color-text-primary)}
+.fg{display:grid;gap:4px;margin-bottom:7px}
+.fg label{font-size:11px;color:var(--color-text-secondary)}
+.fg input,.fg select,.fg textarea{width:100%;padding:6px 8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font:12px var(--font-sans);background:var(--color-background-primary);color:var(--color-text-primary);outline:none}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:#022519}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.uz{border:1px dashed var(--color-border-secondary);border-radius:var(--border-radius-md);padding:14px;text-align:center;cursor:pointer}
+.uz:hover{border-color:#022519}
+.uz p{font-size:12.5px;font-weight:500;color:var(--color-text-primary);margin:3px 0 2px}
+.uz small{font-size:11px;color:var(--color-text-secondary)}
+.lbtn{background:none;border:none;color:var(--color-text-info);font:12px var(--font-sans);cursor:pointer;padding:0;text-align:left;text-decoration:underline}
+.bkbtn{background:none;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:4px 9px;font:12px var(--font-sans);color:var(--color-text-secondary);cursor:pointer}
+.bkbtn:hover{background:var(--color-background-secondary)}
+</style>
+
+<h2 class="sr-only">AiCO SLSU interactive demo — chatbot simulator and admin portal walkthrough</h2>
+<div class="root">
+
+<div class="tabs">
+  <button class="tab on" onclick="swTab('chat',this)">Chatbot demo</button>
+  <button class="tab" onclick="swTab('adm',this)">Admin portal demo</button>
+  <span style="flex:1"></span>
+  <span style="font-size:11px;color:var(--color-text-secondary);align-self:center;padding-right:12px">SLSU ICO · AiCO</span>
+</div>
+
+<!-- CHATBOT -->
+<div id="pnl-chat" class="pnl on chat-wrap">
+  <div class="chat-hdr">
+    <div class="hdr-av">ICO</div>
+    <div><div class="hdr-name">ICO Services Assistant</div><div class="hdr-sub">Southern Luzon State University</div></div>
+    <div class="online"></div>
+    <button class="rst" onclick="resetChat()">Reset</button>
+  </div>
+  <div class="msgs" id="msgs"></div>
+  <div class="qr-area" id="qra"><div class="qr-inner" id="qri"></div></div>
+  <div class="inp-row">
+    <input class="cin" id="cin" placeholder='Try "I need an AVP" or "request layout design"...' onkeydown="if(event.key==='Enter')doSend()">
+    <button class="snd" onclick="doSend()" aria-label="Send">&#10148;</button>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div id="pnl-adm" class="pnl adm-wrap">
+  <div class="sb">
+    <div class="sb-brand"><small>Southern Luzon State University</small><strong>AiCO Admin</strong></div>
+    <div class="sb-user"><div class="sb-av">BA</div><div><strong>Bootstrap Admin</strong><span>admin</span></div></div>
+    <div class="ngl">Overview</div>
+    <div class="ni on" onclick="goPage('dash',this)">Dashboard</div>
+    <div class="ngl">Manage</div>
+    <div class="ni" onclick="goPage('reqs',this)">Account requests <span class="nb" id="rb">3</span></div>
+    <div class="ni" onclick="goPage('revs',this)">Content reviews <span class="nb" id="cb">4</span></div>
+    <div class="ni" onclick="goPage('usrs',this)">Users</div>
+    <div class="ngl">Office user</div>
+    <div class="ni" onclick="goPage('newc',this)">New content</div>
+    <div class="ni" onclick="goPage('subs',this)">Submissions</div>
+  </div>
+  <div class="adm-body">
+    <div class="topbar">
+      <div><h3 id="pgt">Admin dashboard</h3><small id="pgs">Overview of pending queues and published chatbot records</small></div>
+      <div class="tb-btns"><button class="btn" onclick="showNote('Cache refreshed — chatbot now serving latest published content.')">Refresh cache</button></div>
+    </div>
+    <div class="adm-main">
+      <div id="notice" class="notice"></div>
+
+      <!-- DASHBOARD -->
+      <div id="pg-dash" class="pg on">
+        <div class="mgrid">
+          <div class="mc" onclick="goPage('reqs',document.querySelectorAll('.ni')[1])"><div class="lbl">Pending account requests</div><div class="val">3</div><div class="sub">Review requests</div></div>
+          <div class="mc" onclick="goPage('revs',document.querySelectorAll('.ni')[2])"><div class="lbl">Pending content reviews</div><div class="val">4</div><div class="sub">Review content</div></div>
+          <div class="mc"><div class="lbl">Published records</div><div class="val">9</div><div class="sub">Available to chatbot</div></div>
+        </div>
+        <div class="stl">Recent submissions</div>
+        <table class="tbl"><thead><tr><th style="width:55%">Title</th><th>Type</th><th>Status</th></tr></thead><tbody>
+          <tr><td>Request for AVP production</td><td>Citizen's Charter</td><td><span class="bdg bp"><span class="dot"></span>Pending</span></td></tr>
+          <tr><td>How do I request templates?</td><td>FAQ</td><td><span class="bdg bg"><span class="dot"></span>Published</span></td></tr>
+          <tr><td>Layout service fees update</td><td>Citizen's Charter</td><td><span class="bdg bw"><span class="dot"></span>Needs revision</span></td></tr>
+        </tbody></table>
+      </div>
+
+      <!-- ACCOUNT REQUESTS -->
+      <div id="pg-reqs" class="pg">
+        <table class="tbl"><thead><tr><th style="width:40%">Applicant</th><th>Office</th><th>Status</th><th style="width:80px">Action</th></tr></thead><tbody>
+          <tr>
+            <td><div class="pcell"><div class="pav">MS</div><div class="pi"><strong>Maria Santos</strong><small>maria@slsu.edu.ph</small></div></div></td>
+            <td>Registrar</td><td><span class="bdg bp"><span class="dot"></span>Pending</span></td>
+            <td><button class="btn btn-p" onclick="approveReq(this)">Approve</button></td>
+          </tr>
+          <tr>
+            <td><div class="pcell"><div class="pav">JD</div><div class="pi"><strong>Juan Dela Cruz</strong><small>juan@slsu.edu.ph</small></div></div></td>
+            <td>ICO PuDCom</td><td><span class="bdg bp"><span class="dot"></span>Pending</span></td>
+            <td><button class="btn btn-p" onclick="approveReq(this)">Approve</button></td>
+          </tr>
+          <tr>
+            <td><div class="pcell"><div class="pav">AV</div><div class="pi"><strong>Ana Villanueva</strong><small>ana@slsu.edu.ph</small></div></div></td>
+            <td>Student Affairs</td><td><span class="bdg bw"><span class="dot"></span>Needs info</span></td>
+            <td><button class="btn" onclick="">View note</button></td>
+          </tr>
+        </tbody></table>
+      </div>
+
+      <!-- REVIEWS -->
+      <div id="pg-revs" class="pg">
+        <table class="tbl" id="revtbl"><thead><tr><th style="width:42%">Title</th><th>Type</th><th>Office</th><th style="width:130px">Action</th></tr></thead><tbody id="revbody">
+          <tr>
+            <td><button class="lbtn" onclick="openRev(this,'Request for AVP production','Produce audiovisual materials for documentation and promotional use.\n\nOffice/unit: CoDeCS Unit\nProcessing time: 17 working days\nFees: None')">Request for AVP production</button></td>
+            <td>Citizen's Charter</td><td>CoDeCS</td>
+            <td style="white-space:nowrap"><button class="btn btn-ok" style="margin-right:3px" onclick="qApprove(this)">Approve</button><button class="btn btn-bad" onclick="qReject(this)">Reject</button></td>
+          </tr>
+          <tr>
+            <td><button class="lbtn" onclick="openRev(this,'ICO Social Media Guidelines FAQ','Q: What are the posting guidelines?\nA: All posts must use official SLSU templates.\nContact reports@slsu.edu.ph for templates.')">ICO Social Media Guidelines FAQ</button></td>
+            <td>FAQ</td><td>PuMRel</td>
+            <td style="white-space:nowrap"><button class="btn btn-ok" style="margin-right:3px" onclick="qApprove(this)">Approve</button><button class="btn btn-bad" onclick="qReject(this)">Reject</button></td>
+          </tr>
+          <tr>
+            <td><button class="lbtn" onclick="openRev(this,'Speakership Request Process 2026','Updated process for requesting ICO speakership.\nRequirements: Written request, program draft.\nTimeline: Submit 5 working days before event.')">Speakership Request Process 2026</button></td>
+            <td>Event</td><td>PuMRel</td>
+            <td style="white-space:nowrap"><button class="btn btn-ok" style="margin-right:3px" onclick="qApprove(this)">Approve</button><button class="btn btn-bad" onclick="qReject(this)">Reject</button></td>
+          </tr>
+          <tr>
+            <td><button class="lbtn" onclick="openRev(this,'Layout request — external partner','IEC material layout for university partner.\nDeadline: 10 working days.\nFees: None')">Layout request — external partner</button></td>
+            <td>Citizen's Charter</td><td>PuDCom</td>
+            <td style="white-space:nowrap"><button class="btn btn-ok" style="margin-right:3px" onclick="qApprove(this)">Approve</button><button class="btn btn-bad" onclick="qReject(this)">Reject</button></td>
+          </tr>
+        </tbody></table>
+        <div id="rev-det" style="display:none;margin-top:2px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px">
+            <button class="bkbtn" onclick="closeRev()">Back to list</button>
+            <span style="font-size:13px;font-weight:500" id="rev-ttl"></span>
+            <span class="bdg bp" style="margin-left:auto"><span class="dot"></span>Pending review</span>
+          </div>
+          <div class="rw">
+            <div class="rc"><h4>Submitted content</h4><pre id="rev-body"></pre></div>
+            <div class="rc"><h4>Currently published</h4><pre style="color:var(--color-text-secondary)">No published version yet.</pre></div>
+          </div>
+          <div class="dgrid">
+            <div class="dc dc-a"><h4>Approve</h4><p>Publish this version — visible to chatbot immediately.</p><button class="btn btn-ok" style="width:100%" onclick="detApprove()">Approve and publish</button></div>
+            <div class="dc dc-r"><h4>Request revision</h4><p>Return to office. Live content stays unchanged.</p><textarea id="rev-note" placeholder="Enter review note..."></textarea><button class="btn" style="width:100%" onclick="detRevise()">Return for revision</button></div>
+            <div class="dc dc-x"><h4>Reject</h4><p>Reject submission. Published content unaffected.</p><textarea id="rej-note" placeholder="Enter reason for rejection..."></textarea><button class="btn btn-bad" style="width:100%" onclick="detReject()">Reject</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- USERS -->
+      <div id="pg-usrs" class="pg">
+        <table class="tbl"><thead><tr><th style="width:40%">User</th><th>Role</th><th>Office</th><th>Status</th><th style="width:90px">Action</th></tr></thead><tbody>
+          <tr>
+            <td><div class="pcell"><div class="pav">OE</div><div class="pi"><strong>Office Editor</strong><small>editor@slsu.edu.ph</small></div></div></td>
+            <td>Office user</td><td>PuDCom</td><td><span class="bdg bg"><span class="dot"></span>Active</span></td>
+            <td><button class="btn" onclick="togUser(this)">Deactivate</button></td>
+          </tr>
+          <tr>
+            <td><div class="pcell"><div class="pav">RC</div><div class="pi"><strong>Rose Cruz</strong><small>rose@slsu.edu.ph</small></div></div></td>
+            <td>Office user</td><td>CoDeCS</td><td><span class="bdg bg"><span class="dot"></span>Active</span></td>
+            <td><button class="btn" onclick="togUser(this)">Deactivate</button></td>
+          </tr>
+        </tbody></table>
+      </div>
+
+      <!-- NEW CONTENT -->
+      <div id="pg-newc" class="pg">
+        <div class="fs"><h3>Content basics</h3>
+          <div class="fg"><label>Content type</label><select><option>Citizen's Charter service</option><option>FAQ</option><option>Event</option><option>Project</option><option>Program</option><option>Activity</option></select></div>
+          <div class="fg"><label>Title</label><input type="text" value="Request for article and/or report writing"></div>
+          <div class="fg"><label>Description</label><textarea style="height:52px">University units may request ICO to prepare articles, reports, and related write-ups for official use.</textarea></div>
+        </div>
+        <div class="fs"><h3>Service details</h3>
+          <div class="fg"><label>Requirements</label><textarea style="height:44px">Online Job Order form with .docx file containing essential details</textarea></div>
+          <div class="frow">
+            <div class="fg"><label>Fees</label><input type="text" value="None"></div>
+            <div class="fg"><label>Processing time</label><input type="text" value="6 working days and 5 minutes"></div>
+          </div>
+        </div>
+        <div class="fs"><h3>Supporting file</h3>
+          <div class="uz"><p>Drop a file here or choose from your device</p><small>PDF, PNG, JPG, JPEG, or DOCX · max 5 MB</small></div>
+        </div>
+        <button class="btn btn-p" onclick="submitC()">Submit for review</button>
+      </div>
+
+      <!-- SUBMISSIONS -->
+      <div id="pg-subs" class="pg">
+        <table class="tbl"><thead><tr><th style="width:45%">Title</th><th>Type</th><th>Status</th><th>Date</th></tr></thead><tbody>
+          <tr><td>Layout service fees update</td><td>Citizen's Charter</td><td><span class="bdg bw"><span class="dot"></span>Needs revision</span></td><td>2026-05-28</td></tr>
+          <tr><td>Documentation service FAQ</td><td>FAQ</td><td><span class="bdg bg"><span class="dot"></span>Published</span></td><td>2026-05-15</td></tr>
+          <tr><td>AVP service description</td><td>Citizen's Charter</td><td><span class="bdg bp"><span class="dot"></span>Pending review</span></td><td>2026-06-01</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const SVC=[
+  {id:'external-layout-iec-materials',sn:'Layout of IEC materials (external)',audience:'external',service_name:'Request for layout of IEC materials',description:'University partners may request layout designs for IEC materials such as social media posts, tarpaulins, presentations, brochures, flyers, and related publications.',office_or_unit:'ICO – Publications and Digital Communications (PuDCom) Unit',who_may_avail:'University Partners',requirements:['Proof of approved partnership with SLSU (signed MOA or approved request letter)','Completely filled out online Job Order form with layout specifications and related photo/video materials'],submission_timeline:['Submit at least 10 working days before intended use','Same-week requests may be declined without a letter from the University President'],official_link:'https://bit.ly/LayoutRequestICO',fees:'None',processing_time:'9 working days and 5 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'external-documentation-services',sn:'Documentation services (external)',audience:'external',service_name:'Request for documentation services',description:'Partner agencies may request ICO to document events through raw photo and video footage. This does not include AVP highlights.',office_or_unit:'ICO – Content Development and Creative Services (CoDeCS) Unit',who_may_avail:'Partner National Government Agencies and Private Sectors',requirements:['Proof of approved partnership with SLSU','Completely filled out online Job Order form'],submission_timeline:['Submit at least 10 working days before event','Shooting across multiple locations requires 20 working days'],official_link:'https://bit.ly/DocumentationRequestICO',fees:'None',processing_time:'4 working days and 30 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-training-speakership',sn:'Training / speakership',audience:'internal',service_name:'Provision of training and/or speakership',description:'SLSU units may request in-house training or ICO speakership for seminars and training events.',office_or_unit:'ICO – Public and Media Relations (PuMRel) Unit',who_may_avail:'All University Units',requirements:['Written request addressed to the University President through the ICO Head','Training proposal and/or program draft'],submission_timeline:['On-campus requests assessed by ICO','Off-campus requests forwarded to the University President'],official_link:'https://bit.ly/LayoutRequestICO',fees:'None',processing_time:'4 working days and 10 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-layout-iec-materials',sn:'Layout of IEC materials',audience:'internal',service_name:'Request for layout of IEC materials',description:'University units may request layout designs for IEC materials such as social media posts, tarpaulins, brochures, and flyers.',office_or_unit:'ICO – Publications and Digital Communications (PuDCom) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form with layout specifications and photo/video materials','Complete reference details — incomplete submissions are automatically deferred'],submission_timeline:['Submit at least 10 working days before intended use','Same-week requests are strongly discouraged'],official_link:'https://bit.ly/LayoutRequestICO',fees:'None',processing_time:'9 working days and 5 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-writing-request',sn:'Article / report writing',audience:'internal',service_name:'Request for article and/or report writing',description:'University units may request ICO to prepare articles, reports, and technical write-ups.',office_or_unit:'ICO – Publications and Digital Communications (PuDCom) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form','A .docx file containing essential details of the writing request'],submission_timeline:['Articles: at least 5 working days before deadline','Reports and technical papers: at least 10 working days'],official_link:'https://bit.ly/WritingRequestICO',fees:'None',processing_time:'6 working days and 5 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-posting-email-blast',sn:'Posting / email blast',audience:'internal',service_name:'Request for posting and/or email blast',description:'University units may request ICO to publish announcements through Facebook, website, or email blast.',office_or_unit:'ICO – Public and Media Relations (PuMRel) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form','For Facebook/website: Word file with caption and editable Canva link','For email blast: Word file with email body and attachments'],submission_timeline:['Contact ICO at reports@slsu.edu.ph for official posting templates'],official_link:'https://bit.ly/DisseminationRequestICO',fees:'None',processing_time:'30 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-audiovisual-production',sn:'Audiovisual (AVP) production',audience:'internal',service_name:'Request for audiovisual production',description:'University units may request ICO to produce audiovisual materials for documentation, reports, and promotional purposes.',office_or_unit:'ICO – Content Development and Creative Services (CoDeCS) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form','Google Drive link with comprehensive details','Script, storyboard, or mood board if possible'],submission_timeline:['Submit at least 10 working days before event','Requests involving shooting need 20 working days lead time'],official_link:'https://bit.ly/AVPRequestICO',fees:'None',processing_time:'17 working days and 5 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-documentation-services',sn:'Documentation services',audience:'internal',service_name:'Request for documentation services',description:'University units may request ICO to document events by capturing raw photo and video footage.',office_or_unit:'ICO – Content Development and Creative Services (CoDeCS) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form'],submission_timeline:['Submit at least 10 working days before event'],official_link:'https://bit.ly/DocumentationRequestICO',fees:'None',processing_time:'3 working days and 20 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'},
+  {id:'internal-review-layout-writeup',sn:'Review of layout / write-up',audience:'internal',service_name:'Request review of layout and/or write-up',description:'University units may request ICO to review write-ups and/or design layouts of IEC materials such as programs, certificates, and tarpaulins.',office_or_unit:'ICO – Public and Media Relations (PuMRel) Unit',who_may_avail:'All University Units',requirements:['Completely filled out online Job Order form with editable link to the material'],submission_timeline:['Minimum of 5 working days required for review'],official_link:'https://bit.ly/RequestReviewICO',fees:'None',processing_time:'1 working day and 5 minutes',css_reminder:'Please accomplish the Client Satisfaction Survey (CSS) form after the service.'}
+];
+const FAQS=[{question:'How do I request official templates for social media posts?',answer:'Email reports@slsu.edu.ph to request official posting templates. For Facebook and website posts you need an editable Canva link of your pubmat.'}];
+const STOP=new Set(['and','the','for','our','need','how','what','where','when','with','from','that','this','your','about','can','help']);
+const SYN={avp:['audiovisual','video','production'],design:['layout','pubmat','poster','tarpaulin','brochure','flyer'],posting:['facebook','website','publish','email','blast'],report:['article','write','writing'],review:['check','proofread','edit'],speakership:['speaker','seminar','training']};
+
+const msgsEl=document.getElementById('msgs');
+const qriEl=document.getElementById('qri');
+
+function setQRs(qrs){
+  qriEl.innerHTML='';
+  if(!qrs||!qrs.length)return;
+  qrs.forEach(q=>{
+    const b=document.createElement('button');
+    b.className='qr';b.textContent=q.t;
+    b.onclick=()=>{addMsg(q.t,false);qriEl.innerHTML='';showTyping(()=>handle(q.p))};
+    qriEl.appendChild(b);
+  });
+}
+
+function addMsg(text,bot,qrs){
+  const d=document.createElement('div');d.className='msg '+(bot?'bot':'usr');
+  if(bot){const a=document.createElement('div');a.className='bav';a.textContent='ICO';d.appendChild(a)}
+  const b=document.createElement('div');b.className='bub';b.textContent=text;d.appendChild(b);
+  msgsEl.appendChild(d);msgsEl.scrollTop=msgsEl.scrollHeight;
+  setQRs(qrs||[]);
+}
+
+function showTyping(cb){
+  const d=document.createElement('div');d.className='msg bot';d.id='typ';
+  const a=document.createElement('div');a.className='bav';a.textContent='ICO';d.appendChild(a);
+  const t=document.createElement('div');t.className='typing';t.innerHTML='<span></span><span></span><span></span>';d.appendChild(t);
+  msgsEl.appendChild(d);msgsEl.scrollTop=msgsEl.scrollHeight;
+  setTimeout(()=>{const e=document.getElementById('typ');if(e)e.remove();cb()},650);
+}
+
+function doSend(){
+  const v=document.getElementById('cin').value.trim();
+  if(!v)return;
+  document.getElementById('cin').value='';
+  addMsg(v,false);setQRs([]);
+  showTyping(()=>handle(v));
+}
+
+function resetChat(){
+  msgsEl.innerHTML='';setQRs([]);
+  showTyping(()=>addMsg(
+    "Hello! I'm the ICO Services Assistant for Southern Luzon State University.\n\nI can help you find the right ICO service from the Citizen's Charter. What do you need?",
+    true,
+    [
+      {t:'Show all services',p:'hello'},
+      {t:'Layout design',p:'SERVICE_internal-layout-iec-materials'},
+      {t:'Article / report writing',p:'SERVICE_internal-writing-request'},
+      {t:'AVP production',p:'SERVICE_internal-audiovisual-production'},
+      {t:'Posting / email blast',p:'SERVICE_internal-posting-email-blast'},
+      {t:'Talk to ICO staff',p:'HANDOFF'}
+    ]
+  ));
+}
+
+function handle(inp){
+  const i=inp.trim();
+  if(!i||i==='BACK_TO_START'){allSvc();return}
+  if(i==='HANDOFF'){handoff();return}
+  if(i==='BACK_TO_SERVICES'){allSvc();return}
+  if(i.startsWith('SERVICE_')){const s=SVC.find(x=>x.id===i.slice(8));s?guide(s):handoff();return}
+  const lo=i.toLowerCase();
+  if(lo==='hello'||lo==='hi'||lo.includes('kumusta')||lo.includes('kamusta')){allSvc();return}
+  const fq=FAQS.find(f=>i.toLowerCase().split(' ').some(w=>w.length>3&&f.question.toLowerCase().includes(w)));
+  if(fq){addMsg(fq.question+'\n\n'+fq.answer,true,[{t:'Back to services',p:'BACK_TO_SERVICES'},{t:'Talk to ICO staff',p:'HANDOFF'}]);return}
+  const toks=i.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(w=>w.length>2&&!STOP.has(w));
+  const exp=new Set(toks);toks.forEach(t=>{if(SYN[t])SYN[t].forEach(s=>exp.add(s))});
+  const scored=SVC.map(s=>{
+    const hay=[s.id,s.service_name,s.description,s.who_may_avail,...s.requirements,...s.submission_timeline].join(' ').toLowerCase();
+    const sc=[...exp].reduce((n,t)=>{if(t==='avp'&&s.id.includes('audiovisual'))return n+5;return n+(hay.includes(t)?s.id.includes(t)?3:1:0)},0);
+    return{s,sc};
+  }).filter(x=>x.sc>=1).sort((a,b)=>b.sc-a.sc);
+  scored.length?guide(scored[0].s):handoff();
+}
+
+function allSvc(){
+  const lines=SVC.map((s,i)=>`${i+1}. ${s.service_name}`).join('\n');
+  addMsg('Here are the ICO services:\n\n'+lines+'\n\nPlease choose a service.',true,
+    SVC.map(s=>({t:s.sn,p:'SERVICE_'+s.id}))
+  );
+}
+
+function guide(s){
+  const r=s.requirements.map(x=>'• '+x).join('\n');
+  const tl=s.submission_timeline.map(x=>'• '+x).join('\n');
+  addMsg(
+    `${s.service_name}\n\n${s.description}\n\nOffice/unit: ${s.office_or_unit}\nWho may avail: ${s.who_may_avail}\n\nRequirements:\n${r}\n\nSubmission reminders:\n${tl}\n\nOfficial link: ${s.official_link}\nFees: ${s.fees}\nProcessing time: ${s.processing_time}\n\n${s.css_reminder}`,
+    true,
+    [{t:'Back to all services',p:'BACK_TO_SERVICES'},{t:'Back to start',p:'BACK_TO_START'},{t:'Talk to ICO staff',p:'HANDOFF'}]
+  );
+}
+
+function handoff(){
+  addMsg(
+    "I can only confirm details listed in the ICO Citizen's Charter.\n\nFor requests that need staff judgment, exceptions, approvals, or information outside the charter, please contact ICO directly:\n\nEmail: reports@slsu.edu.ph\nWebsite: https://www.slsu.edu.ph\nFacebook: https://www.facebook.com/SLSUOFFICIAL",
+    true,
+    [{t:'Back to start',p:'BACK_TO_START'},{t:'Show all services',p:'hello'}]
+  );
+}
+
+function swTab(id,btn){
+  document.querySelectorAll('.pnl').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+  document.getElementById('pnl-'+id).classList.add('on');
+  btn.classList.add('on');
+}
+
+const pgMeta={
+  dash:['Admin dashboard','Overview of pending queues and published chatbot records'],
+  reqs:['Account requests','Review, approve, or reject staff access requests'],
+  revs:['Content reviews','Review pending office submissions before publishing'],
+  usrs:['User management','Activate, deactivate, and assign users to offices'],
+  newc:['New content','Submit a content record for admin review'],
+  subs:['Submissions','View your submission history and admin notes']
+};
+
+function goPage(id,el){
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
+  document.getElementById('pg-'+id).classList.add('on');
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('on'));
+  if(el)el.classList.add('on');
+  const m=pgMeta[id]||['Admin',''];
+  document.getElementById('pgt').textContent=m[0];
+  document.getElementById('pgs').textContent=m[1];
+  document.getElementById('notice').style.display='none';
+  closeRev();
+}
+
+function showNote(msg){
+  const n=document.getElementById('notice');n.textContent=msg;n.style.display='block';
+  setTimeout(()=>n.style.display='none',4000);
+}
+
+function approveReq(btn){
+  const row=btn.closest('tr');
+  row.cells[2].innerHTML='<span class="bdg bg"><span class="dot"></span>Approved</span>';
+  btn.textContent='Approved';btn.disabled=true;btn.style.opacity='.4';
+  const b=document.getElementById('rb');
+  if(b){const n=parseInt(b.textContent)-1;b.textContent=n;if(n<=0)b.style.display='none'}
+  showNote('Account approved — user account created and assigned to office.');
+}
+
+function decBadge(id){
+  const b=document.getElementById(id);
+  if(b){const n=parseInt(b.textContent)-1;b.textContent=n;if(n<=0)b.style.display='none'}
+}
+
+let curRow=null;
+function openRev(btn,title,body){
+  document.getElementById('rev-ttl').textContent=title;
+  document.getElementById('rev-body').textContent=body;
+  document.getElementById('revtbl').style.display='none';
+  document.getElementById('rev-det').style.display='block';
+  curRow=btn.closest('tr');
+}
+function closeRev(){
+  const t=document.getElementById('revtbl');const d=document.getElementById('rev-det');
+  if(t)t.style.display='';if(d)d.style.display='none';curRow=null;
+}
+function detApprove(){
+  if(curRow)curRow.cells[3].innerHTML='<span class="bdg bg"><span class="dot"></span>Published</span>';
+  closeRev();decBadge('cb');showNote('Content approved and published — chatbot cache refreshed.');
+}
+function detRevise(){
+  const n=document.getElementById('rev-note').value.trim();
+  if(!n){alert('Please enter a review note.');return}
+  if(curRow)curRow.cells[3].innerHTML='<span class="bdg bw"><span class="dot"></span>Needs revision</span>';
+  closeRev();decBadge('cb');showNote('Submission returned for revision — office user notified.');
+}
+function detReject(){
+  const n=document.getElementById('rej-note').value.trim();
+  if(!n){alert('Please enter a reason for rejection.');return}
+  if(curRow)curRow.cells[3].innerHTML='<span class="bdg br"><span class="dot"></span>Rejected</span>';
+  closeRev();decBadge('cb');showNote('Submission rejected — office user notified.');
+}
+function qApprove(btn){
+  const row=btn.closest('tr');
+  row.cells[3].innerHTML='<span class="bdg bg"><span class="dot"></span>Published</span>';
+  decBadge('cb');showNote('Content approved and published.');
+}
+function qReject(btn){
+  const row=btn.closest('tr');
+  row.cells[3].innerHTML='<span class="bdg br"><span class="dot"></span>Rejected</span>';
+  decBadge('cb');showNote('Content rejected.');
+}
+function togUser(btn){
+  const row=btn.closest('tr');
+  const active=row.cells[3].innerHTML.includes('Active');
+  row.cells[3].innerHTML=active?'<span class="bdg br"><span class="dot"></span>Inactive</span>':'<span class="bdg bg"><span class="dot"></span>Active</span>';
+  btn.textContent=active?'Reactivate':'Deactivate';
+  showNote(active?'User deactivated.':'User reactivated.');
+}
+function submitC(){
+  showNote('Content submitted for review — admin will be notified.');
+  goPage('subs',document.querySelectorAll('.ni')[4]);
+}
+
+resetChat();
+</script>
